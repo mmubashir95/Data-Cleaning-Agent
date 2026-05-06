@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-from utils.nlp_cleaner import clean_text_columns
+from utils.nlp_cleaner import clean_text_columns, detect_text_columns
 from utils.data_profiler import classify_columns
 
 
@@ -81,6 +81,9 @@ def clean_dataset(
     scaled_columns: list[str] = []
     scaler_used: str | None = None
     cleaned_text_columns: list[str] = []
+    nlp_cleaning_actions: list[str] = []
+    nlp_original_backup_columns: list[str] = []
+    nlp_before_after_examples: dict[str, dict[str, str]] = {}
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -259,10 +262,14 @@ def clean_dataset(
 
     if encode_categorical_selected:
         classification = classify_columns(cleaned_df, target_column=target_column)
+        detected_text_columns = set(detect_text_columns(cleaned_df, target_column=target_column))
         candidate_columns = [
             column
             for column in classification["categorical_columns"]
-            if column != target_column and column in cleaned_df.columns
+            if column != target_column
+            and column in cleaned_df.columns
+            and column not in detected_text_columns
+            and not str(column).endswith("_original")
         ]
 
         if candidate_columns:
@@ -294,21 +301,30 @@ def clean_dataset(
         cleaning_steps.append("Skipped categorical encoding.")
 
     if nlp_cleaning_selected:
-        classification = classify_columns(cleaned_df, target_column=target_column)
-        candidate_text_columns = [
-            column
-            for column in classification["text_columns"]
-            if column != target_column and column in cleaned_df.columns
-        ]
+        candidate_text_columns = detect_text_columns(cleaned_df, target_column=target_column)
 
         if candidate_text_columns:
-            cleaned_df, cleaned_text_columns = clean_text_columns(
+            cleaned_df, cleaned_text_columns, nlp_original_backup_columns, nlp_before_after_examples = clean_text_columns(
                 cleaned_df,
                 candidate_text_columns,
+                remove_numbers=True,
                 remove_stopwords=True,
+                use_stemming=False,
             )
+            nlp_cleaning_actions = [
+                "Converted text to lowercase.",
+                "Removed URLs.",
+                "Removed emails.",
+                "Removed HTML tags.",
+                "Removed punctuation.",
+                "Removed special characters.",
+                "Removed numbers.",
+                "Removed extra whitespace.",
+                "Removed common English stopwords.",
+                "Tokenized text internally and joined cleaned tokens back into strings.",
+            ]
             cleaning_steps.append(
-                "Cleaned text columns for NLP: " + ", ".join(cleaned_text_columns) + "."
+                "Applied NLP cleaning to text columns: " + ", ".join(cleaned_text_columns) + "."
             )
             cleaning_steps.append(
                 "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
@@ -378,6 +394,9 @@ def clean_dataset(
         "encoded_columns_generated_count": encoded_columns_generated_count,
         "target_encoding_recommendation": target_encoding_recommendation,
         "cleaned_text_columns": cleaned_text_columns,
+        "nlp_cleaning_actions": nlp_cleaning_actions,
+        "nlp_original_backup_columns": nlp_original_backup_columns,
+        "nlp_before_after_examples": nlp_before_after_examples,
         "scaled_columns": scaled_columns,
         "scaler_used": scaler_used,
         "options_used": options.copy(),

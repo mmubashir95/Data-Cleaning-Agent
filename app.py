@@ -170,6 +170,12 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
 
         st.subheader("Cleaned Dataset Preview")
         st.dataframe(cleaned_df.head())
+        st.download_button(
+            "Download Cleaned CSV",
+            data=cleaned_df.to_csv(index=False).encode("utf-8"),
+            file_name="cleaned_dataset.csv",
+            mime="text/csv",
+        )
 
         st.subheader("Cleaning Summary")
         st.write(f"Original rows: {cleaning_summary['original_rows']}")
@@ -226,6 +232,10 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             cleaning_summary.get("encoded_columns_generated_count", 0),
         )
         st.write("Cleaned text columns:", cleaning_summary.get("cleaned_text_columns", []))
+        st.write(
+            "Original text backup columns:",
+            cleaning_summary.get("nlp_original_backup_columns", []),
+        )
         st.write("Scaled numeric columns:", cleaning_summary.get("scaled_columns", []))
 
         if cleaning_summary.get("encoded_columns"):
@@ -255,6 +265,11 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             st.info(
                 "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
             )
+            st.write("NLP cleaning actions:", cleaning_summary.get("nlp_cleaning_actions", []))
+            st.write("NLP before vs after examples:")
+            for column_name, example in cleaning_summary.get("nlp_before_after_examples", {}).items():
+                st.write(f"{column_name} before: {example['before']}")
+                st.write(f"{column_name} after: {example['after']}")
 
         st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])
         st.write("DEBUG - Missing filled columns:", cleaning_summary.get("missing_filled", {}))
