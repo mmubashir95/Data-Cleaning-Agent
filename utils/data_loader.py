@@ -1,17 +1,32 @@
-"""Utilities for loading datasets into pandas DataFrames."""
+"""Utilities for safely loading uploaded datasets into pandas DataFrames."""
 
-from pathlib import Path
+from __future__ import annotations
 
 import pandas as pd
 
 
-def load_data(file_path: str | Path) -> pd.DataFrame:
-    """Load a CSV or Excel file and return a DataFrame."""
-    path = Path(file_path)
+def load_dataset(uploaded_file) -> tuple[pd.DataFrame | None, str | None]:
+    """Load a CSV or Excel upload and return the data plus an error message.
 
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path)
-    if path.suffix.lower() in {".xlsx", ".xls"}:
-        return pd.read_excel(path)
+    The function is intentionally defensive so the Streamlit app can continue
+    running even when a user uploads an invalid or unsupported file.
+    """
+    if uploaded_file is None:
+        return None, "No file was uploaded."
 
-    raise ValueError(f"Unsupported file type: {path.suffix}")
+    file_name = uploaded_file.name.lower()
+
+    try:
+        # Reset the in-memory file pointer so repeated reads behave consistently.
+        uploaded_file.seek(0)
+
+        if file_name.endswith(".csv"):
+            dataframe = pd.read_csv(uploaded_file)
+        elif file_name.endswith((".xlsx", ".xls")):
+            dataframe = pd.read_excel(uploaded_file)
+        else:
+            return None, "Unsupported file format. Please upload a CSV or Excel file."
+    except Exception as exc:
+        return None, f"Unable to read the uploaded file: {exc}"
+
+    return dataframe, None

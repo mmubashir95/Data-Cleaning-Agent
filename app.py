@@ -8,13 +8,15 @@ streamlit run app.py
 
 import streamlit as st
 
+from utils.data_loader import load_dataset
 
-def build_sidebar() -> None:
-    """Render the sidebar controls for future cleaning options."""
+
+def build_sidebar():
+    """Render the sidebar controls and return the uploaded file object."""
     st.sidebar.header("Dataset Settings")
 
-    # Let the user upload either CSV or Excel files.
-    st.sidebar.file_uploader(
+    # Allow users to upload tabular datasets in common formats.
+    uploaded_file = st.sidebar.file_uploader(
         "Upload a dataset",
         type=["csv", "xlsx", "xls"],
         help="Supported formats: CSV and Excel.",
@@ -50,6 +52,33 @@ def build_sidebar() -> None:
         options=["StandardScaler", "MinMaxScaler"],
     )
 
+    return uploaded_file
+
+
+def render_uploaded_dataset(uploaded_file) -> None:
+    """Display dataset details after a file has been uploaded."""
+    dataframe, error_message = load_dataset(uploaded_file)
+
+    # Show a readable error without breaking the app when loading fails.
+    if error_message:
+        st.error(error_message)
+        return
+
+    if dataframe is None:
+        st.error("The dataset could not be loaded.")
+        return
+
+    st.success(f"Uploaded file: {uploaded_file.name}")
+    st.write(f"Dataset shape: {dataframe.shape[0]} rows x {dataframe.shape[1]} columns")
+
+    # Warn users about empty files while still keeping the app responsive.
+    if dataframe.empty:
+        st.warning("The uploaded dataset is empty. Please upload a file with data.")
+        return
+
+    st.subheader("Dataset Preview")
+    st.dataframe(dataframe.head())
+
 
 def main() -> None:
     """Render the starter interface for the data cleaning app."""
@@ -59,7 +88,7 @@ def main() -> None:
         layout="wide",
     )
 
-    build_sidebar()
+    uploaded_file = build_sidebar()
 
     # Main page heading and short introduction.
     st.title("Data Cleaning Agent for ML Dataset Preparation")
@@ -79,8 +108,12 @@ def main() -> None:
         """
     )
 
-    # Clear prompt for the next user action.
-    st.info("Upload a CSV or Excel dataset from the sidebar to get started.")
+    # Keep the landing page simple until the user uploads a dataset.
+    if uploaded_file is None:
+        st.info("Upload a CSV or Excel dataset from the sidebar to get started.")
+        return
+
+    render_uploaded_dataset(uploaded_file)
 
 
 if __name__ == "__main__":
