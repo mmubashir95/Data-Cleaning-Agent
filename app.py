@@ -6,6 +6,7 @@ pip install -r requirements.txt
 streamlit run app.py
 """
 
+import pandas as pd
 import streamlit as st
 
 from utils.data_cleaner import clean_dataset
@@ -39,15 +40,24 @@ def build_sidebar():
 
     st.sidebar.subheader("Cleaning Options")
 
-    # These options are collected into a dictionary so the cleaner can use them.
+    # Store each checkbox in a named variable so the keys passed to the cleaner
+    # are explicit and easy to debug.
+    remove_duplicates = st.sidebar.checkbox("Remove duplicates")
+    handle_missing_values = st.sidebar.checkbox("Handle missing values")
+    fix_data_types = st.sidebar.checkbox("Fix wrong data types")
+    encode_categorical = st.sidebar.checkbox("Encode categorical columns")
+    scale_numeric = st.sidebar.checkbox("Scale numeric columns")
+    handle_outliers = st.sidebar.checkbox("Handle outliers")
+    nlp_cleaning = st.sidebar.checkbox("NLP text cleaning")
+
     cleaning_options = {
-        "remove_duplicates": st.sidebar.checkbox("Remove duplicates"),
-        "handle_missing_values": st.sidebar.checkbox("Handle missing values"),
-        "fix_wrong_data_types": st.sidebar.checkbox("Fix wrong data types"),
-        "encode_categorical_columns": st.sidebar.checkbox("Encode categorical columns"),
-        "scale_numeric_columns": st.sidebar.checkbox("Scale numeric columns"),
-        "handle_outliers": st.sidebar.checkbox("Handle outliers"),
-        "nlp_text_cleaning": st.sidebar.checkbox("NLP text cleaning"),
+        "remove_duplicates": remove_duplicates,
+        "handle_missing_values": handle_missing_values,
+        "fix_data_types": fix_data_types,
+        "handle_outliers": handle_outliers,
+        "encode_categorical": encode_categorical,
+        "scale_numeric": scale_numeric,
+        "nlp_cleaning": nlp_cleaning,
     }
 
     # The scaler choice is added now and can be used later during implementation.
@@ -166,25 +176,42 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
         st.write(f"Final columns: {cleaning_summary['final_columns']}")
         st.write(f"Duplicate rows removed: {cleaning_summary['duplicate_rows_removed']}")
         st.write(
-            "Columns where missing values were filled: "
-            f"{cleaning_summary['filled_missing_columns']}"
+            "Missing value handling selected: "
+            f"{cleaning_summary['options_used']['handle_missing_values']}"
         )
+        st.write(
+            "Columns where missing values were filled: "
+            f"{cleaning_summary['columns_where_missing_values_were_filled']}"
+        )
+
+        st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])
+        st.write("DEBUG - Missing filled columns:", cleaning_summary.get("missing_filled", {}))
+        st.write("DEBUG - cleaned_df missing values:", cleaned_df.isna().sum().to_dict())
+
+        if not cleaning_summary["options_used"]["handle_missing_values"]:
+            st.info(
+                "Missing value handling was not selected, so missing values were not changed."
+            )
 
         st.write("Missing values before cleaning:")
         st.dataframe(
-            {
+            pd.DataFrame(
+                {
                 "Column": list(cleaning_summary["missing_values_before"].keys()),
                 "Missing Values": list(cleaning_summary["missing_values_before"].values()),
-            },
+                }
+            ),
             use_container_width=True,
         )
 
         st.write("Missing values after cleaning:")
         st.dataframe(
-            {
+            pd.DataFrame(
+                {
                 "Column": list(cleaning_summary["missing_values_after"].keys()),
                 "Missing Values": list(cleaning_summary["missing_values_after"].values()),
-            },
+                }
+            ),
             use_container_width=True,
         )
 

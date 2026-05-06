@@ -6,8 +6,6 @@ from typing import Any
 
 import pandas as pd
 
-from utils.data_profiler import classify_columns
-
 
 def _get_mode_or_unknown(series: pd.Series) -> Any:
     """Return the most common value, or a safe fallback when no mode exists."""
@@ -23,13 +21,14 @@ def clean_dataset(
     target_column: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Apply the selected starter cleaning steps to a validated dataset."""
-    cleaned_df = df.copy()
+    cleaned_df = df.copy(deep=True)
     cleaning_steps: list[str] = []
-    filled_columns: list[str] = []
+    handle_missing_values_selected = options.get("handle_missing_values", False)
+    missing_filled: dict[str, dict[str, str | int]] = {}
 
-    original_rows = len(cleaned_df)
-    original_columns = len(cleaned_df.columns)
-    missing_values_before = cleaned_df.isna().sum().to_dict()
+    original_rows = len(df)
+    original_columns = len(df.columns)
+    missing_values_before = df.isnull().sum().to_dict()
 
     # Pre-cleaning validation is assumed to have already passed upstream.
     if options.get("remove_duplicates", False):
@@ -40,36 +39,63 @@ def clean_dataset(
         duplicates_removed = 0
         cleaning_steps.append("Skipped duplicate removal.")
 
-    if options.get("handle_missing_values", False):
-        column_groups = classify_columns(cleaned_df, target_column=target_column)
+    if handle_missing_values_selected:
+        for column in cleaned_df.columns:
+            if column == target_column:
+                continue
+            missing_count = int(cleaned_df[column].isna().sum())
 
-        for column in column_groups["numeric_columns"]:
-            if cleaned_df[column].isna().any():
-                cleaned_df[column] = cleaned_df[column].fillna(cleaned_df[column].median())
-                filled_columns.append(column)
+            if missing_count == 0:
+                continue
 
-        for column in column_groups["categorical_columns"]:
-            if cleaned_df[column].isna().any():
-                cleaned_df[column] = cleaned_df[column].fillna(_get_mode_or_unknown(cleaned_df[column]))
-                filled_columns.append(column)
+            if pd.api.types.is_numeric_dtype(cleaned_df[column]):
+                median_value = cleaned_df[column].median()
 
-        for column in column_groups["text_columns"]:
-            if cleaned_df[column].isna().any():
-                cleaned_df[column] = cleaned_df[column].fillna("")
-                filled_columns.append(column)
+                if pd.isna(median_value):
+                    cleaned_df[column] = cleaned_df[column].fillna(0)
+                    fill_value = 0
+                else:
+                    cleaned_df[column] = cleaned_df[column].fillna(median_value)
+                    fill_value = median_value
 
-        if filled_columns:
+                missing_filled[column] = {
+                    "missing_count_before": missing_count,
+                    "strategy": "median",
+                    "fill_value": str(fill_value),
+                }
+            else:
+                mode_values = cleaned_df[column].mode(dropna=True)
+
+                if not mode_values.empty:
+                    fill_value = mode_values.iloc[0]
+                    cleaned_df[column] = cleaned_df[column].fillna(fill_value)
+                    strategy = "mode"
+                else:
+                    fill_value = "Unknown"
+                    cleaned_df[column] = cleaned_df[column].fillna(fill_value)
+                    strategy = "Unknown"
+
+                missing_filled[column] = {
+                    "missing_count_before": missing_count,
+                    "strategy": strategy,
+                    "fill_value": str(fill_value),
+                }
+
+        if missing_filled:
+            filled_columns = sorted(missing_filled.keys())
             cleaning_steps.append(
-                "Filled missing values in these columns: "
-                + ", ".join(sorted(set(filled_columns)))
-                + "."
+                "Filled missing values in these columns: " + ", ".join(filled_columns) + "."
             )
         else:
-            cleaning_steps.append("No missing values needed filling in supported column groups.")
+            filled_columns = []
+            cleaning_steps.append("No missing values needed filling.")
     else:
-        cleaning_steps.append("Skipped missing value handling.")
+        filled_columns = []
+        cleaning_steps.append(
+            "Missing value handling was not selected, so missing values were not changed."
+        )
 
-    missing_values_after = cleaned_df.isna().sum().to_dict()
+    missing_values_after = cleaned_df.isnull().sum().to_dict()
 
     cleaning_summary = {
         "original_rows": original_rows,
@@ -78,8 +104,10 @@ def clean_dataset(
         "final_columns": len(cleaned_df.columns),
         "missing_values_before": missing_values_before,
         "missing_values_after": missing_values_after,
+        "missing_filled": missing_filled,
         "duplicate_rows_removed": duplicates_removed,
-        "filled_missing_columns": filled_columns,
+        "columns_where_missing_values_were_filled": filled_columns,
+        "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,
     }
 
