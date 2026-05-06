@@ -7,6 +7,72 @@ from pathlib import Path
 from typing import Any
 
 
+def _make_json_serializable(value: Any) -> Any:
+    """Recursively convert values into JSON-safe Python types."""
+    if isinstance(value, dict):
+        return {str(key): _make_json_serializable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_make_json_serializable(item) for item in value]
+    if isinstance(value, tuple):
+        return [_make_json_serializable(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
+
+
+def generate_cleaning_report(
+    profile: dict[str, Any],
+    validation_result: dict[str, Any],
+    cleaning_summary: dict[str, Any],
+    ml_recommendation: dict[str, Any],
+    original_file_name: str,
+) -> tuple[dict[str, Any], str]:
+    """Build and save a single JSON cleaning report for the current workflow."""
+    report_data = {
+        "original_file_name": original_file_name,
+        "original_rows": profile.get("rows"),
+        "original_columns": profile.get("columns"),
+        "final_rows": cleaning_summary.get("final_rows"),
+        "final_columns": cleaning_summary.get("final_columns"),
+        "missing_values_before_cleaning": cleaning_summary.get("missing_values_before", {}),
+        "missing_values_after_cleaning": cleaning_summary.get("missing_values_after", {}),
+        "duplicate_rows_removed": cleaning_summary.get("duplicate_rows_removed", 0),
+        "numeric_columns_detected": profile.get("numeric_columns", []),
+        "categorical_columns_detected": profile.get("categorical_columns", []),
+        "text_columns_detected": profile.get("text_columns", []),
+        "validation_errors": validation_result.get("errors", []),
+        "validation_warnings": validation_result.get("warnings", []),
+        "columns_encoded": cleaning_summary.get("encoded_columns", []),
+        "columns_scaled": cleaning_summary.get("scaled_columns", []),
+        "scaler_used": cleaning_summary.get("scaler_used"),
+        "outlier_handling_summary": cleaning_summary.get("outlier_summary", []),
+        "nlp_cleaning_summary": {
+            "cleaned_text_columns": cleaning_summary.get("cleaned_text_columns", []),
+            "nlp_cleaning_actions": cleaning_summary.get("nlp_cleaning_actions", []),
+        },
+        "ml_recommendation": {
+            "problem_type": ml_recommendation.get("recommended_problem_type"),
+            "reason": ml_recommendation.get("reason"),
+            "algorithms": ml_recommendation.get("algorithms", []),
+        },
+        "recommended_ml_problem_type": ml_recommendation.get("recommended_problem_type"),
+        "recommended_algorithms": ml_recommendation.get("algorithms", []),
+        "cleaning_steps": cleaning_summary.get("cleaning_steps", []),
+    }
+
+    safe_report_data = _make_json_serializable(report_data)
+    report_name = f"cleaning_report_{Path(original_file_name).stem}.json"
+    report_path = Path("reports") / report_name
+    generate_report(safe_report_data, report_path)
+
+    return safe_report_data, str(report_path)
+
+
 def build_cleaning_report(
     *,
     original_rows: int,

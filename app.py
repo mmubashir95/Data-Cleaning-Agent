@@ -6,6 +6,8 @@ pip install -r requirements.txt
 streamlit run app.py
 """
 
+import json
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 
@@ -13,6 +15,7 @@ from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
 from utils.ml_recommender import recommend_ml_approach
 from utils.data_profiler import profile_dataset
+from utils.report_generator import generate_cleaning_report
 from utils.data_validator import validate_dataset
 
 
@@ -200,6 +203,13 @@ def render_uploaded_dataset(
             options=cleaning_options,
             target_column=selected_target,
         )
+        cleaning_report, cleaning_report_path = generate_cleaning_report(
+            profile,
+            validation_result,
+            cleaning_summary,
+            ml_recommendation,
+            uploaded_file.name,
+        )
 
         st.subheader("Cleaned Dataset Preview")
         st.dataframe(cleaned_df.head())
@@ -209,6 +219,13 @@ def render_uploaded_dataset(
             file_name="cleaned_dataset.csv",
             mime="text/csv",
         )
+        st.download_button(
+            "Download Cleaning Report",
+            data=json.dumps(cleaning_report, indent=2),
+            file_name=Path(cleaning_report_path).name,
+            mime="application/json",
+        )
+        st.write(f"Cleaning report saved to: {cleaning_report_path}")
 
         st.subheader("Cleaning Summary")
         st.write(f"Original rows: {cleaning_summary['original_rows']}")
