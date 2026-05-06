@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
+from utils.nlp_cleaner import detect_text_columns
 from utils.data_profiler import classify_columns
 
 NLP_TEXT_HINTS = {
@@ -73,7 +74,7 @@ def _is_regression_target(series: pd.Series) -> bool:
 
     unique_count = non_null.nunique(dropna=True)
     unique_ratio = unique_count / len(non_null)
-    return unique_count > 10 and unique_ratio > 0.1
+    return unique_count > 4 and unique_ratio >= 0.5
 
 
 def _looks_like_main_nlp_text_feature(df: pd.DataFrame, text_columns: list[str]) -> str | None:
@@ -110,7 +111,8 @@ def recommend_ml_approach(
     """Recommend a generic ML approach using target behavior and column heuristics."""
     column_types = classify_columns(df, target_column=target_column)
     warnings: list[str] = []
-    detected_text_column = _looks_like_main_nlp_text_feature(df, text_columns)
+    candidate_text_columns = detect_text_columns(df, target_column=target_column)
+    detected_text_column = _looks_like_main_nlp_text_feature(df, candidate_text_columns)
 
     if target_column is None:
         if problem_type in {"Classification", "Regression", "NLP/Text Classification"}:
