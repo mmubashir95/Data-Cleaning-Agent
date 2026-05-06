@@ -174,9 +174,17 @@ def render_uploaded_dataset(
 
     st.subheader("ML Recommendation")
     st.write(
-        f"Recommended problem type: {ml_recommendation['recommended_problem_type']}"
+        f"Problem Type: {ml_recommendation['recommended_problem_type']}"
     )
     st.write(f"Reason: {ml_recommendation['reason']}")
+    st.write(f"Target Column: {ml_recommendation['target_column']}")
+    st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
+    st.write(f"Numeric Columns: {ml_recommendation['numeric_columns']}")
+    st.write(f"Categorical Columns: {ml_recommendation['categorical_columns']}")
+    st.write(f"Text Columns: {ml_recommendation['text_columns']}")
+    st.write(f"Boolean Columns: {ml_recommendation['boolean_columns']}")
+    st.write(f"Datetime Columns: {ml_recommendation['datetime_columns']}")
+    st.write(f"ID-like Columns: {ml_recommendation['id_like_columns']}")
 
     for warning_message in ml_recommendation["warnings"]:
         st.warning(warning_message)
