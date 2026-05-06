@@ -8,13 +8,14 @@ streamlit run app.py
 
 import streamlit as st
 
+from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
 from utils.data_profiler import profile_dataset
 from utils.data_validator import validate_dataset
 
 
 def build_sidebar():
-    """Render the sidebar controls and return the uploaded file object."""
+    """Render the sidebar controls and return the selected inputs."""
     st.sidebar.header("Dataset Settings")
 
     # Allow users to upload tabular datasets in common formats.
@@ -25,7 +26,7 @@ def build_sidebar():
     )
 
     # This dropdown will help guide future cleaning logic.
-    st.sidebar.selectbox(
+    problem_type = st.sidebar.selectbox(
         "Problem type",
         options=[
             "Auto-detect",
@@ -38,26 +39,28 @@ def build_sidebar():
 
     st.sidebar.subheader("Cleaning Options")
 
-    # These checkboxes are UI placeholders for future cleaning steps.
-    st.sidebar.checkbox("Remove duplicates")
-    st.sidebar.checkbox("Handle missing values")
-    st.sidebar.checkbox("Fix wrong data types")
-    st.sidebar.checkbox("Encode categorical columns")
-    st.sidebar.checkbox("Scale numeric columns")
-    st.sidebar.checkbox("Handle outliers")
-    st.sidebar.checkbox("NLP text cleaning")
+    # These options are collected into a dictionary so the cleaner can use them.
+    cleaning_options = {
+        "remove_duplicates": st.sidebar.checkbox("Remove duplicates"),
+        "handle_missing_values": st.sidebar.checkbox("Handle missing values"),
+        "fix_wrong_data_types": st.sidebar.checkbox("Fix wrong data types"),
+        "encode_categorical_columns": st.sidebar.checkbox("Encode categorical columns"),
+        "scale_numeric_columns": st.sidebar.checkbox("Scale numeric columns"),
+        "handle_outliers": st.sidebar.checkbox("Handle outliers"),
+        "nlp_text_cleaning": st.sidebar.checkbox("NLP text cleaning"),
+    }
 
     # The scaler choice is added now and can be used later during implementation.
     st.sidebar.subheader("Scaler Choice")
-    st.sidebar.radio(
+    scaler_choice = st.sidebar.radio(
         "Choose a scaler",
         options=["StandardScaler", "MinMaxScaler"],
     )
 
-    return uploaded_file
+    return uploaded_file, problem_type, cleaning_options, scaler_choice
 
 
-def render_uploaded_dataset(uploaded_file) -> None:
+def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) -> None:
     """Display dataset details after a file has been uploaded."""
     # Execution order for the workflow should remain:
     # load dataset -> validate -> profile -> clean
@@ -145,8 +148,49 @@ def render_uploaded_dataset(uploaded_file) -> None:
     st.write(f"Boolean columns: {profile['boolean_columns']}")
     st.write(f"ID-like columns: {profile['id_like_columns']}")
 
-    # Cleaning is not implemented yet, but it should be placed after this point
-    # so it only runs when validation has passed.
+    # Cleaning runs only after the dataset has passed pre-cleaning validation.
+    if st.button("Clean Dataset"):
+        cleaned_df, cleaning_summary = clean_dataset(
+            dataframe,
+            options=cleaning_options,
+            target_column=selected_target,
+        )
+
+        st.subheader("Cleaned Dataset Preview")
+        st.dataframe(cleaned_df.head())
+
+        st.subheader("Cleaning Summary")
+        st.write(f"Original rows: {cleaning_summary['original_rows']}")
+        st.write(f"Original columns: {cleaning_summary['original_columns']}")
+        st.write(f"Final rows: {cleaning_summary['final_rows']}")
+        st.write(f"Final columns: {cleaning_summary['final_columns']}")
+        st.write(f"Duplicate rows removed: {cleaning_summary['duplicate_rows_removed']}")
+        st.write(
+            "Columns where missing values were filled: "
+            f"{cleaning_summary['filled_missing_columns']}"
+        )
+
+        st.write("Missing values before cleaning:")
+        st.dataframe(
+            {
+                "Column": list(cleaning_summary["missing_values_before"].keys()),
+                "Missing Values": list(cleaning_summary["missing_values_before"].values()),
+            },
+            use_container_width=True,
+        )
+
+        st.write("Missing values after cleaning:")
+        st.dataframe(
+            {
+                "Column": list(cleaning_summary["missing_values_after"].keys()),
+                "Missing Values": list(cleaning_summary["missing_values_after"].values()),
+            },
+            use_container_width=True,
+        )
+
+        st.write("Step-by-step explanation:")
+        for step in cleaning_summary["cleaning_steps"]:
+            st.write(f"- {step}")
 
 
 def main() -> None:
@@ -157,7 +201,7 @@ def main() -> None:
         layout="wide",
     )
 
-    uploaded_file = build_sidebar()
+    uploaded_file, _, cleaning_options, _ = build_sidebar()
 
     # Main page heading and short introduction.
     st.title("Data Cleaning Agent for ML Dataset Preparation")
@@ -182,7 +226,7 @@ def main() -> None:
         st.info("Upload a CSV or Excel dataset from the sidebar to get started.")
         return
 
-    render_uploaded_dataset(uploaded_file)
+    render_uploaded_dataset(uploaded_file, cleaning_options)
 
 
 if __name__ == "__main__":
