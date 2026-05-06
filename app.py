@@ -9,6 +9,7 @@ streamlit run app.py
 import streamlit as st
 
 from utils.data_loader import load_dataset
+from utils.data_profiler import profile_dataset
 
 
 def build_sidebar():
@@ -78,6 +79,45 @@ def render_uploaded_dataset(uploaded_file) -> None:
 
     st.subheader("Dataset Preview")
     st.dataframe(dataframe.head())
+
+    # Profiling currently runs immediately after loading. In a later phase,
+    # this should run only after dataset validation passes successfully.
+    profile = profile_dataset(dataframe)
+
+    st.subheader("Dataset Profiling")
+
+    # Let the user choose a target column from the uploaded dataset.
+    st.selectbox(
+        "Select target column",
+        options=profile["column_names"],
+        help="Choose the target column you plan to predict or analyze.",
+    )
+
+    st.write("Column names:")
+    st.write(profile["column_names"])
+
+    st.write("Data types:")
+    st.dataframe(
+        {
+            "Column": list(profile["data_types"].keys()),
+            "Data Type": list(profile["data_types"].values()),
+        },
+        use_container_width=True,
+    )
+
+    st.write("Missing values:")
+    st.dataframe(
+        {
+            "Column": list(profile["missing_values"].keys()),
+            "Missing Values": list(profile["missing_values"].values()),
+        },
+        use_container_width=True,
+    )
+
+    st.write(f"Duplicate rows: {profile['duplicate_rows']}")
+    st.write(f"Numeric columns: {profile['numeric_columns']}")
+    st.write(f"Categorical columns: {profile['categorical_columns']}")
+    st.write(f"Text columns: {profile['text_columns']}")
 
 
 def main() -> None:
