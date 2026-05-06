@@ -184,6 +184,10 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             f"{cleaning_summary['options_used']['fix_data_types']}"
         )
         st.write(
+            "Handle outliers selected: "
+            f"{cleaning_summary['options_used']['handle_outliers']}"
+        )
+        st.write(
             "Columns where missing values were filled: "
             f"{cleaning_summary['columns_where_missing_values_were_filled']}"
         )
@@ -200,10 +204,16 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             "Skipped type conversion columns:",
             cleaning_summary.get("skipped_type_conversion_columns", {}),
         )
+        st.write("Outlier summary:", cleaning_summary.get("outlier_summary", []))
 
         if cleaning_summary.get("converted_columns"):
             st.info(
                 "Type conversion helps ML because numeric and datetime columns are easier to clean, validate, and transform."
+            )
+
+        if cleaning_summary.get("outlier_summary"):
+            st.info(
+                "Outliers were capped with the IQR method. Extreme values should not be deleted blindly, because they may still contain useful signal."
             )
 
         st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])

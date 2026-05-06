@@ -59,12 +59,14 @@ def clean_dataset(
     cleaning_steps: list[str] = []
     handle_missing_values_selected = options.get("handle_missing_values", False)
     fix_data_types_selected = options.get("fix_data_types", False)
+    handle_outliers_selected = options.get("handle_outliers", False)
     missing_filled: dict[str, dict[str, str | int]] = {}
     converted_columns: dict[str, dict[str, str]] = {}
     converted_numeric_columns: list[str] = []
     converted_date_columns: list[str] = []
     skipped_type_conversion_columns: dict[str, str] = {}
     type_conversion_notes: list[str] = []
+    outlier_summary: list[dict[str, str | float | int]] = []
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -193,6 +195,54 @@ def clean_dataset(
             "Missing value handling was not selected, so missing values were not changed."
         )
 
+    if handle_outliers_selected:
+        numeric_columns = cleaned_df.select_dtypes(include=["number"]).columns
+
+        for column in numeric_columns:
+            if column == target_column:
+                continue
+
+            series = cleaned_df[column].dropna()
+            if len(series) < 4:
+                continue
+
+            q1 = series.quantile(0.25)
+            q3 = series.quantile(0.75)
+            iqr = q3 - q1
+
+            if pd.isna(iqr) or iqr == 0:
+                continue
+
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            outlier_mask = (cleaned_df[column] < lower_bound) | (cleaned_df[column] > upper_bound)
+            outlier_count = int(outlier_mask.sum())
+
+            if outlier_count == 0:
+                continue
+
+            cleaned_df[column] = cleaned_df[column].clip(lower=lower_bound, upper=upper_bound)
+            outlier_summary.append(
+                {
+                    "column_name": column,
+                    "lower_bound": float(lower_bound),
+                    "upper_bound": float(upper_bound),
+                    "outliers_detected": outlier_count,
+                    "action_taken": "capped/winsorized",
+                }
+            )
+
+        if outlier_summary:
+            capped_columns = ", ".join(item["column_name"] for item in outlier_summary)
+            cleaning_steps.append(f"Capped outliers using the IQR method for: {capped_columns}.")
+            cleaning_steps.append(
+                "Outliers were capped instead of deleting rows, because extreme values should not be removed blindly."
+            )
+        else:
+            cleaning_steps.append("No numeric outliers were capped with the IQR method.")
+    else:
+        cleaning_steps.append("Skipped outlier handling.")
+
     missing_values_after = cleaned_df.isnull().sum().to_dict()
 
     cleaning_summary = {
@@ -210,6 +260,7 @@ def clean_dataset(
         "type_conversion_notes": type_conversion_notes,
         "duplicate_rows_removed": duplicates_removed,
         "columns_where_missing_values_were_filled": filled_columns,
+        "outlier_summary": outlier_summary,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,
     }
