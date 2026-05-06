@@ -180,9 +180,19 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             f"{cleaning_summary['options_used']['handle_missing_values']}"
         )
         st.write(
+            "Fix wrong data types selected: "
+            f"{cleaning_summary['options_used']['fix_data_types']}"
+        )
+        st.write(
             "Columns where missing values were filled: "
             f"{cleaning_summary['columns_where_missing_values_were_filled']}"
         )
+        st.write("Converted columns:", cleaning_summary.get("converted_columns", {}))
+
+        if cleaning_summary.get("converted_columns"):
+            st.info(
+                "Type conversion helps ML because numeric and datetime columns are easier to clean, validate, and transform."
+            )
 
         st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])
         st.write("DEBUG - Missing filled columns:", cleaning_summary.get("missing_filled", {}))
