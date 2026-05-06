@@ -10,6 +10,7 @@ import streamlit as st
 
 from utils.data_loader import load_dataset
 from utils.data_profiler import profile_dataset
+from utils.data_validator import validate_dataset
 
 
 def build_sidebar():
@@ -58,6 +59,8 @@ def build_sidebar():
 
 def render_uploaded_dataset(uploaded_file) -> None:
     """Display dataset details after a file has been uploaded."""
+    # Execution order for the workflow should remain:
+    # load dataset -> validate -> profile -> clean
     dataframe, error_message = load_dataset(uploaded_file)
 
     # Show a readable error without breaking the app when loading fails.
@@ -72,11 +75,6 @@ def render_uploaded_dataset(uploaded_file) -> None:
     st.success(f"Uploaded file: {uploaded_file.name}")
     st.write(f"Dataset shape: {dataframe.shape[0]} rows x {dataframe.shape[1]} columns")
 
-    # Warn users about empty files while still keeping the app responsive.
-    if dataframe.empty:
-        st.warning("The uploaded dataset is empty. Please upload a file with data.")
-        return
-
     # Let the user choose an optional target column before profiling so the
     # profiling summary can clearly mark it in the results.
     target_options = [None] + list(dataframe.columns)
@@ -90,8 +88,27 @@ def render_uploaded_dataset(uploaded_file) -> None:
     st.subheader("Dataset Preview")
     st.dataframe(dataframe.head())
 
-    # Profiling currently runs immediately after loading. In a later phase,
-    # this should run only after dataset validation passes successfully.
+    # This is the dedicated pre-cleaning validation step. Profiling and any
+    # later cleaning steps must stop when blocking validation errors exist.
+    validation_result = validate_dataset(
+        dataframe,
+        uploaded_file_name=uploaded_file.name,
+        target_column=selected_target,
+    )
+
+    st.subheader("Pre-Cleaning Validation")
+
+    for warning_message in validation_result["warnings"]:
+        st.warning(warning_message)
+
+    if validation_result["errors"]:
+        for error_message in validation_result["errors"]:
+            st.error(error_message)
+        return
+
+    st.success("Validation passed. Profiling can continue.")
+
+    # Profiling only runs after validation passes successfully.
     profile = profile_dataset(dataframe, target_column=selected_target)
 
     st.subheader("Dataset Profiling")
@@ -127,6 +144,9 @@ def render_uploaded_dataset(uploaded_file) -> None:
     st.write(f"Datetime columns: {profile['datetime_columns']}")
     st.write(f"Boolean columns: {profile['boolean_columns']}")
     st.write(f"ID-like columns: {profile['id_like_columns']}")
+
+    # Cleaning is not implemented yet, but it should be placed after this point
+    # so it only runs when validation has passed.
 
 
 def main() -> None:
