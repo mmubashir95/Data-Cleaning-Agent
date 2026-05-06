@@ -11,6 +11,7 @@ import streamlit as st
 
 from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
+from utils.ml_recommender import recommend_ml_approach
 from utils.data_profiler import profile_dataset
 from utils.data_validator import validate_dataset
 
@@ -72,7 +73,11 @@ def build_sidebar():
     return uploaded_file, problem_type, cleaning_options, scaler_choice
 
 
-def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) -> None:
+def render_uploaded_dataset(
+    uploaded_file,
+    selected_problem_type: str,
+    cleaning_options: dict[str, bool],
+) -> None:
     """Display dataset details after a file has been uploaded."""
     # Execution order for the workflow should remain:
     # load dataset -> validate -> profile -> clean
@@ -159,6 +164,26 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
     st.write(f"Datetime columns: {profile['datetime_columns']}")
     st.write(f"Boolean columns: {profile['boolean_columns']}")
     st.write(f"ID-like columns: {profile['id_like_columns']}")
+
+    ml_recommendation = recommend_ml_approach(
+        dataframe,
+        target_column=selected_target,
+        problem_type=selected_problem_type,
+        text_columns=profile["text_columns"],
+    )
+
+    st.subheader("ML Recommendation")
+    st.write(
+        f"Recommended problem type: {ml_recommendation['recommended_problem_type']}"
+    )
+    st.write(f"Reason: {ml_recommendation['reason']}")
+
+    for warning_message in ml_recommendation["warnings"]:
+        st.warning(warning_message)
+
+    st.write("Recommended algorithms:")
+    for algorithm in ml_recommendation["algorithms"]:
+        st.write(f"- {algorithm['name']}: {algorithm['reason']}")
 
     # Cleaning runs only after the dataset has passed pre-cleaning validation.
     if st.button("Clean Dataset"):
@@ -319,7 +344,7 @@ def main() -> None:
         layout="wide",
     )
 
-    uploaded_file, _, cleaning_options, _ = build_sidebar()
+    uploaded_file, selected_problem_type, cleaning_options, _ = build_sidebar()
 
     # Main page heading and short introduction.
     st.title("Data Cleaning Agent for ML Dataset Preparation")
@@ -344,7 +369,7 @@ def main() -> None:
         st.info("Upload a CSV or Excel dataset from the sidebar to get started.")
         return
 
-    render_uploaded_dataset(uploaded_file, cleaning_options)
+    render_uploaded_dataset(uploaded_file, selected_problem_type, cleaning_options)
 
 
 if __name__ == "__main__":
