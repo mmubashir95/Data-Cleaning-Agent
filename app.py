@@ -188,6 +188,10 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             f"{cleaning_summary['options_used']['handle_outliers']}"
         )
         st.write(
+            "Encode categorical columns selected: "
+            f"{cleaning_summary['options_used']['encode_categorical']}"
+        )
+        st.write(
             "Columns where missing values were filled: "
             f"{cleaning_summary['columns_where_missing_values_were_filled']}"
         )
@@ -205,6 +209,19 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             cleaning_summary.get("skipped_type_conversion_columns", {}),
         )
         st.write("Outlier summary:", cleaning_summary.get("outlier_summary", []))
+        st.write("Encoded source columns:", cleaning_summary.get("encoded_columns", []))
+        st.write(
+            "New encoded columns count:",
+            cleaning_summary.get("encoded_columns_generated_count", 0),
+        )
+
+        if cleaning_summary.get("encoded_columns"):
+            st.info(
+                "ML models need numeric input, so text categories are converted into 0/1 columns."
+            )
+
+        if cleaning_summary.get("target_encoding_recommendation"):
+            st.info(cleaning_summary["target_encoding_recommendation"])
 
         if cleaning_summary.get("converted_columns"):
             st.info(

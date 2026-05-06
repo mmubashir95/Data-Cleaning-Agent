@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from utils.data_profiler import classify_columns
+
 
 def _get_mode_or_unknown(series: pd.Series) -> Any:
     """Return the most common value, or a safe fallback when no mode exists."""
@@ -60,6 +62,7 @@ def clean_dataset(
     handle_missing_values_selected = options.get("handle_missing_values", False)
     fix_data_types_selected = options.get("fix_data_types", False)
     handle_outliers_selected = options.get("handle_outliers", False)
+    encode_categorical_selected = options.get("encode_categorical", False)
     missing_filled: dict[str, dict[str, str | int]] = {}
     converted_columns: dict[str, dict[str, str]] = {}
     converted_numeric_columns: list[str] = []
@@ -67,6 +70,9 @@ def clean_dataset(
     skipped_type_conversion_columns: dict[str, str] = {}
     type_conversion_notes: list[str] = []
     outlier_summary: list[dict[str, str | float | int]] = []
+    encoded_columns: list[str] = []
+    encoded_columns_generated_count = 0
+    target_encoding_recommendation: str | None = None
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -243,6 +249,42 @@ def clean_dataset(
     else:
         cleaning_steps.append("Skipped outlier handling.")
 
+    if encode_categorical_selected:
+        classification = classify_columns(cleaned_df, target_column=target_column)
+        candidate_columns = [
+            column
+            for column in classification["categorical_columns"]
+            if column != target_column and column in cleaned_df.columns
+        ]
+
+        if candidate_columns:
+            original_column_count = len(cleaned_df.columns)
+            cleaned_df = pd.get_dummies(
+                cleaned_df,
+                columns=candidate_columns,
+                drop_first=False,
+            )
+            encoded_columns = sorted(candidate_columns)
+            encoded_columns_generated_count = len(cleaned_df.columns) - original_column_count
+            cleaning_steps.append(
+                "Encoded categorical columns with one-hot encoding: "
+                + ", ".join(encoded_columns)
+                + "."
+            )
+            cleaning_steps.append(
+                "ML models need numeric input, so text categories are converted into 0/1 columns."
+            )
+        else:
+            cleaning_steps.append("No categorical feature columns were available for one-hot encoding.")
+
+        if target_column and target_column in classification["categorical_columns"]:
+            target_encoding_recommendation = (
+                f"Target column '{target_column}' looks categorical. Keep it separate from feature "
+                "encoding and only encode it later if the chosen ML workflow requires it."
+            )
+    else:
+        cleaning_steps.append("Skipped categorical encoding.")
+
     missing_values_after = cleaned_df.isnull().sum().to_dict()
 
     cleaning_summary = {
@@ -261,6 +303,9 @@ def clean_dataset(
         "duplicate_rows_removed": duplicates_removed,
         "columns_where_missing_values_were_filled": filled_columns,
         "outlier_summary": outlier_summary,
+        "encoded_columns": encoded_columns,
+        "encoded_columns_generated_count": encoded_columns_generated_count,
+        "target_encoding_recommendation": target_encoding_recommendation,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,
     }
