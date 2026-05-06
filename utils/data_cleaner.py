@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from utils.data_profiler import classify_columns
 
@@ -63,6 +64,8 @@ def clean_dataset(
     fix_data_types_selected = options.get("fix_data_types", False)
     handle_outliers_selected = options.get("handle_outliers", False)
     encode_categorical_selected = options.get("encode_categorical", False)
+    scale_numeric_selected = options.get("scale_numeric", False)
+    scaler_choice = options.get("scaler_choice", "StandardScaler")
     missing_filled: dict[str, dict[str, str | int]] = {}
     converted_columns: dict[str, dict[str, str]] = {}
     converted_numeric_columns: list[str] = []
@@ -73,6 +76,8 @@ def clean_dataset(
     encoded_columns: list[str] = []
     encoded_columns_generated_count = 0
     target_encoding_recommendation: str | None = None
+    scaled_columns: list[str] = []
+    scaler_used: str | None = None
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -285,6 +290,44 @@ def clean_dataset(
     else:
         cleaning_steps.append("Skipped categorical encoding.")
 
+    if scale_numeric_selected:
+        numeric_columns = cleaned_df.select_dtypes(include=["number"]).columns.tolist()
+        feature_numeric_columns = [column for column in numeric_columns if column != target_column]
+
+        if feature_numeric_columns:
+            try:
+                if scaler_choice == "MinMaxScaler":
+                    scaler = MinMaxScaler()
+                    scaler_used = "MinMaxScaler"
+                    cleaning_steps.append(
+                        "MinMaxScaler scales values into a fixed range, usually 0 to 1."
+                    )
+                else:
+                    scaler = StandardScaler()
+                    scaler_used = "StandardScaler"
+                    cleaning_steps.append(
+                        "StandardScaler standardizes values around mean 0 and standard deviation 1."
+                    )
+
+                cleaned_df[feature_numeric_columns] = scaler.fit_transform(
+                    cleaned_df[feature_numeric_columns]
+                )
+                scaled_columns = feature_numeric_columns
+                cleaning_steps.append(
+                    "Scaled numeric feature columns: " + ", ".join(scaled_columns) + "."
+                )
+                cleaning_steps.append(
+                    "Scaling helps algorithms like Logistic Regression, Linear Regression, KNN, SVM, and Neural Networks."
+                )
+            except Exception:
+                scaler_used = scaler_choice
+                cleaning_steps.append("Numeric scaling was selected, but scaling could not be applied safely.")
+        else:
+            scaler_used = scaler_choice
+            cleaning_steps.append("No numeric feature columns were available for scaling.")
+    else:
+        cleaning_steps.append("Skipped numeric scaling.")
+
     missing_values_after = cleaned_df.isnull().sum().to_dict()
 
     cleaning_summary = {
@@ -306,6 +349,8 @@ def clean_dataset(
         "encoded_columns": encoded_columns,
         "encoded_columns_generated_count": encoded_columns_generated_count,
         "target_encoding_recommendation": target_encoding_recommendation,
+        "scaled_columns": scaled_columns,
+        "scaler_used": scaler_used,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,
     }

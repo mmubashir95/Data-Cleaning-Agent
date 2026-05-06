@@ -50,6 +50,14 @@ def build_sidebar():
     handle_outliers = st.sidebar.checkbox("Handle outliers")
     nlp_cleaning = st.sidebar.checkbox("NLP text cleaning")
 
+    scaler_choice = None
+    if scale_numeric:
+        st.sidebar.subheader("Scaler Choice")
+        scaler_choice = st.sidebar.radio(
+            "Choose a scaler",
+            options=["StandardScaler", "MinMaxScaler"],
+        )
+
     cleaning_options = {
         "remove_duplicates": remove_duplicates,
         "handle_missing_values": handle_missing_values,
@@ -57,15 +65,9 @@ def build_sidebar():
         "handle_outliers": handle_outliers,
         "encode_categorical": encode_categorical,
         "scale_numeric": scale_numeric,
+        "scaler_choice": scaler_choice,
         "nlp_cleaning": nlp_cleaning,
     }
-
-    # The scaler choice is added now and can be used later during implementation.
-    st.sidebar.subheader("Scaler Choice")
-    scaler_choice = st.sidebar.radio(
-        "Choose a scaler",
-        options=["StandardScaler", "MinMaxScaler"],
-    )
 
     return uploaded_file, problem_type, cleaning_options, scaler_choice
 
@@ -192,6 +194,11 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             f"{cleaning_summary['options_used']['encode_categorical']}"
         )
         st.write(
+            "Scale numeric columns selected: "
+            f"{cleaning_summary['options_used']['scale_numeric']}"
+        )
+        st.write("Scaler used:", cleaning_summary.get("scaler_used"))
+        st.write(
             "Columns where missing values were filled: "
             f"{cleaning_summary['columns_where_missing_values_were_filled']}"
         )
@@ -214,6 +221,7 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             "New encoded columns count:",
             cleaning_summary.get("encoded_columns_generated_count", 0),
         )
+        st.write("Scaled numeric columns:", cleaning_summary.get("scaled_columns", []))
 
         if cleaning_summary.get("encoded_columns"):
             st.info(
@@ -231,6 +239,11 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
         if cleaning_summary.get("outlier_summary"):
             st.info(
                 "Outliers were capped with the IQR method. Extreme values should not be deleted blindly, because they may still contain useful signal."
+            )
+
+        if cleaning_summary.get("scaled_columns"):
+            st.info(
+                "Scaling helps algorithms like Logistic Regression, Linear Regression, KNN, SVM, and Neural Networks."
             )
 
         st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])
