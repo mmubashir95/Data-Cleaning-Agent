@@ -140,6 +140,9 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
         "target_column": target_column,
     }
 
+    if df.empty or len(df.columns) == 0:
+        return classification
+
     for column in df.columns:
         series = df[column]
 

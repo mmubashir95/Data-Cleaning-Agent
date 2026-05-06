@@ -32,7 +32,8 @@ def validate_dataset(
         return {"is_valid": False, "errors": errors, "warnings": warnings}
 
     if df.empty:
-        errors.append("The uploaded dataset is empty.")
+        warnings.append("The uploaded dataset is empty, so there is nothing to clean yet.")
+        return {"is_valid": False, "errors": errors, "warnings": warnings}
 
     if len(df.index) < 1:
         errors.append("The dataset must contain at least one row.")

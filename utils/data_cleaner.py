@@ -61,6 +61,7 @@ def clean_dataset(
     """Apply the selected starter cleaning steps to a validated dataset."""
     cleaned_df = df.copy(deep=True)
     cleaning_steps: list[str] = []
+    skipped_steps: list[str] = []
     handle_missing_values_selected = options.get("handle_missing_values", False)
     fix_data_types_selected = options.get("fix_data_types", False)
     handle_outliers_selected = options.get("handle_outliers", False)
@@ -88,6 +89,10 @@ def clean_dataset(
     original_rows = len(df)
     original_columns = len(df.columns)
     missing_values_before = df.isnull().sum().to_dict()
+
+    def record_skipped_step(message: str) -> None:
+        cleaning_steps.append(message)
+        skipped_steps.append(message)
 
     # Pre-cleaning validation is assumed to have already passed upstream.
     if options.get("remove_duplicates", False):
@@ -150,7 +155,7 @@ def clean_dataset(
                     "Converted date-like text columns to datetime so time information can be handled more consistently."
                 )
         else:
-            cleaning_steps.append("No safe data type conversions were detected.")
+            record_skipped_step("Data type fixing was selected, but no safe column conversions were found, so this step was skipped.")
             type_conversion_notes.append("No columns met the safety threshold for type conversion.")
     else:
         cleaning_steps.append("Skipped wrong data type fixing.")
@@ -205,7 +210,7 @@ def clean_dataset(
             )
         else:
             filled_columns = []
-            cleaning_steps.append("No missing values needed filling.")
+            record_skipped_step("Missing value handling was selected, but no missing values were found, so this step was skipped.")
     else:
         filled_columns = []
         cleaning_steps.append(
@@ -256,7 +261,7 @@ def clean_dataset(
                 "Outliers were capped instead of deleting rows, because extreme values should not be removed blindly."
             )
         else:
-            cleaning_steps.append("No numeric outliers were capped with the IQR method.")
+            record_skipped_step("Outlier handling was selected, but no numeric feature columns with detectable outliers were found, so this step was skipped.")
     else:
         cleaning_steps.append("Skipped outlier handling.")
 
@@ -290,7 +295,9 @@ def clean_dataset(
                 "ML models need numeric input, so text categories are converted into 0/1 columns."
             )
         else:
-            cleaning_steps.append("No categorical feature columns were available for one-hot encoding.")
+            record_skipped_step(
+                "Encoding was selected, but no categorical feature columns were found, so this step was skipped."
+            )
 
         if target_column and target_column in classification["categorical_columns"]:
             target_encoding_recommendation = (
@@ -304,7 +311,12 @@ def clean_dataset(
         candidate_text_columns = detect_text_columns(cleaned_df, target_column=target_column)
 
         if candidate_text_columns:
-            cleaned_df, cleaned_text_columns, nlp_original_backup_columns, nlp_before_after_examples = clean_text_columns(
+            (
+                cleaned_df,
+                cleaned_text_columns,
+                nlp_original_backup_columns,
+                nlp_before_after_examples,
+            ) = clean_text_columns(
                 cleaned_df,
                 candidate_text_columns,
                 remove_numbers=True,
@@ -323,14 +335,23 @@ def clean_dataset(
                 "Removed common English stopwords.",
                 "Tokenized text internally and joined cleaned tokens back into strings.",
             ]
-            cleaning_steps.append(
-                "Applied NLP cleaning to text columns: " + ", ".join(cleaned_text_columns) + "."
-            )
-            cleaning_steps.append(
-                "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
-            )
+            if cleaned_text_columns:
+                cleaning_steps.append(
+                    "Applied NLP cleaning to text columns: "
+                    + ", ".join(cleaned_text_columns)
+                    + "."
+                )
+                cleaning_steps.append(
+                    "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
+                )
+            else:
+                record_skipped_step(
+                    "NLP cleaning was selected, but no text columns were cleaned safely, so this step was skipped."
+                )
         else:
-            cleaning_steps.append("No text columns were available for NLP cleaning.")
+            record_skipped_step(
+                "NLP cleaning was selected, but no text columns were found, so this step was skipped."
+            )
     else:
         cleaning_steps.append("Skipped NLP text cleaning.")
 
@@ -365,10 +386,14 @@ def clean_dataset(
                 )
             except Exception:
                 scaler_used = scaler_choice
-                cleaning_steps.append("Numeric scaling was selected, but scaling could not be applied safely.")
+                record_skipped_step(
+                    "Scaling was selected, but numeric scaling could not be applied safely, so this step was skipped."
+                )
         else:
             scaler_used = scaler_choice
-            cleaning_steps.append("No numeric feature columns were available for scaling.")
+            record_skipped_step(
+                "Scaling was selected, but no numeric feature columns were found, so this step was skipped."
+            )
     else:
         cleaning_steps.append("Skipped numeric scaling.")
 
@@ -401,6 +426,7 @@ def clean_dataset(
         "scaler_used": scaler_used,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,
+        "skipped_steps": skipped_steps,
     }
 
     return cleaned_df, cleaning_summary

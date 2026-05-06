@@ -18,6 +18,11 @@ def _make_json_serializable(value: Any) -> Any:
         return [_make_json_serializable(item) for item in value]
     if isinstance(value, Path):
         return str(value)
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
 
 
 def make_safe_stem(file_name: str) -> str:
@@ -25,12 +30,6 @@ def make_safe_stem(file_name: str) -> str:
     raw_stem = Path(file_name).stem.strip().lower()
     safe_stem = re.sub(r"[^a-z0-9]+", "_", raw_stem).strip("_")
     return safe_stem or "dataset"
-
-    try:
-        json.dumps(value)
-        return value
-    except TypeError:
-        return str(value)
 
 
 def generate_cleaning_report(
@@ -71,6 +70,7 @@ def generate_cleaning_report(
         "recommended_ml_problem_type": ml_recommendation.get("recommended_problem_type"),
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
         "cleaning_steps": cleaning_summary.get("cleaning_steps", []),
+        "skipped_steps": cleaning_summary.get("skipped_steps", []),
     }
 
     safe_report_data = _make_json_serializable(report_data)

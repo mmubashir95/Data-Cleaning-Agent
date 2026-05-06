@@ -168,16 +168,19 @@ def clean_text_columns(
         if column not in cleaned.columns:
             continue
 
-        original_series = cleaned[column].fillna("").astype(str)
-        cleaned[f"{column}_original"] = original_series
-        cleaned[column] = original_series.apply(
-            lambda value: preprocess_text(
-                value,
-                remove_numbers=remove_numbers,
-                remove_stopwords=remove_stopwords,
-                use_stemming=use_stemming,
+        try:
+            original_series = cleaned[column].fillna("").astype(str)
+            cleaned[f"{column}_original"] = original_series
+            cleaned[column] = original_series.apply(
+                lambda value: preprocess_text(
+                    value,
+                    remove_numbers=remove_numbers,
+                    remove_stopwords=remove_stopwords,
+                    use_stemming=use_stemming,
+                )
             )
-        )
+        except Exception:
+            continue
 
         cleaned_columns.append(column)
         original_backup_columns.append(f"{column}_original")

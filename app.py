@@ -95,6 +95,10 @@ def render_uploaded_dataset(
         st.error("The dataset could not be loaded.")
         return
 
+    if dataframe.empty:
+        st.warning("The uploaded dataset is empty, so there is nothing to profile or clean yet.")
+        return
+
     st.success(f"Uploaded file: {uploaded_file.name}")
     st.write(f"Dataset shape: {dataframe.shape[0]} rows x {dataframe.shape[1]} columns")
 
@@ -107,6 +111,9 @@ def render_uploaded_dataset(
         format_func=lambda value: "None" if value is None else value,
         help="Choose the target column you plan to predict or analyze.",
     )
+
+    if selected_target is None:
+        st.info("No target column selected. Cleaning can still continue, and clustering will be recommended by default.")
 
     st.subheader("Dataset Preview")
     st.dataframe(dataframe.head())
@@ -127,6 +134,9 @@ def render_uploaded_dataset(
     if validation_result["errors"]:
         for error_message in validation_result["errors"]:
             st.error(error_message)
+        return
+
+    if not validation_result["is_valid"]:
         return
 
     st.success("Validation passed. Profiling can continue.")
@@ -198,23 +208,27 @@ def render_uploaded_dataset(
 
     # Cleaning runs only after the dataset has passed pre-cleaning validation.
     if st.button("Clean Dataset"):
-        cleaned_df, cleaning_summary = clean_dataset(
-            dataframe,
-            options=cleaning_options,
-            target_column=selected_target,
-        )
-        cleaned_csv_name = f"cleaned_{make_safe_stem(uploaded_file.name)}.csv"
-        cleaned_csv_path = Path("output") / cleaned_csv_name
-        cleaned_csv_path.parent.mkdir(parents=True, exist_ok=True)
-        cleaned_df.to_csv(cleaned_csv_path, index=False)
+        try:
+            cleaned_df, cleaning_summary = clean_dataset(
+                dataframe,
+                options=cleaning_options,
+                target_column=selected_target,
+            )
+            cleaned_csv_name = f"cleaned_{make_safe_stem(uploaded_file.name)}.csv"
+            cleaned_csv_path = Path("output") / cleaned_csv_name
+            cleaned_csv_path.parent.mkdir(parents=True, exist_ok=True)
+            cleaned_df.to_csv(cleaned_csv_path, index=False)
 
-        cleaning_report, cleaning_report_path = generate_cleaning_report(
-            profile,
-            validation_result,
-            cleaning_summary,
-            ml_recommendation,
-            uploaded_file.name,
-        )
+            cleaning_report, cleaning_report_path = generate_cleaning_report(
+                profile,
+                validation_result,
+                cleaning_summary,
+                ml_recommendation,
+                uploaded_file.name,
+            )
+        except Exception as exc:
+            st.error(f"Cleaning could not be completed safely. Details: {exc}")
+            return
 
         st.subheader("Cleaned Dataset Preview")
         st.dataframe(cleaned_df.head())
@@ -363,6 +377,11 @@ def render_uploaded_dataset(
         for step in cleaning_summary["cleaning_steps"]:
             st.write(f"- {step}")
 
+        if cleaning_summary.get("skipped_steps"):
+            st.subheader("Skipped Steps")
+            for skipped_step in cleaning_summary["skipped_steps"]:
+                st.warning(skipped_step)
+
         st.write("Type conversion notes:")
         for note in cleaning_summary.get("type_conversion_notes", []):
             st.write(f"- {note}")
@@ -398,7 +417,7 @@ def main() -> None:
 
     # Keep the landing page simple until the user uploads a dataset.
     if uploaded_file is None:
-        st.info("Upload a CSV or Excel dataset from the sidebar to get started.")
+        st.info("No file uploaded yet. Upload a CSV or Excel dataset from the sidebar to get started.")
         return
 
     render_uploaded_dataset(uploaded_file, selected_problem_type, cleaning_options)
