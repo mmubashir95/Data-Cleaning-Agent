@@ -197,6 +197,10 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             "Scale numeric columns selected: "
             f"{cleaning_summary['options_used']['scale_numeric']}"
         )
+        st.write(
+            "NLP text cleaning selected: "
+            f"{cleaning_summary['options_used']['nlp_cleaning']}"
+        )
         st.write("Scaler used:", cleaning_summary.get("scaler_used"))
         st.write(
             "Columns where missing values were filled: "
@@ -221,6 +225,7 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             "New encoded columns count:",
             cleaning_summary.get("encoded_columns_generated_count", 0),
         )
+        st.write("Cleaned text columns:", cleaning_summary.get("cleaned_text_columns", []))
         st.write("Scaled numeric columns:", cleaning_summary.get("scaled_columns", []))
 
         if cleaning_summary.get("encoded_columns"):
@@ -244,6 +249,11 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
         if cleaning_summary.get("scaled_columns"):
             st.info(
                 "Scaling helps algorithms like Logistic Regression, Linear Regression, KNN, SVM, and Neural Networks."
+            )
+
+        if cleaning_summary.get("cleaned_text_columns"):
+            st.info(
+                "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
             )
 
         st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])
