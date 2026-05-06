@@ -77,21 +77,27 @@ def render_uploaded_dataset(uploaded_file) -> None:
         st.warning("The uploaded dataset is empty. Please upload a file with data.")
         return
 
+    # Let the user choose an optional target column before profiling so the
+    # profiling summary can clearly mark it in the results.
+    target_options = [None] + list(dataframe.columns)
+    selected_target = st.selectbox(
+        "Select target column (optional)",
+        options=target_options,
+        format_func=lambda value: "None" if value is None else value,
+        help="Choose the target column you plan to predict or analyze.",
+    )
+
     st.subheader("Dataset Preview")
     st.dataframe(dataframe.head())
 
     # Profiling currently runs immediately after loading. In a later phase,
     # this should run only after dataset validation passes successfully.
-    profile = profile_dataset(dataframe)
+    profile = profile_dataset(dataframe, target_column=selected_target)
 
     st.subheader("Dataset Profiling")
-
-    # Let the user choose a target column from the uploaded dataset.
-    st.selectbox(
-        "Select target column",
-        options=profile["column_names"],
-        help="Choose the target column you plan to predict or analyze.",
-    )
+    st.write(f"Rows: {profile['rows']}")
+    st.write(f"Columns: {profile['columns']}")
+    st.write(f"Target column: {profile['target_column']}")
 
     st.write("Column names:")
     st.write(profile["column_names"])
@@ -117,7 +123,10 @@ def render_uploaded_dataset(uploaded_file) -> None:
     st.write(f"Duplicate rows: {profile['duplicate_rows']}")
     st.write(f"Numeric columns: {profile['numeric_columns']}")
     st.write(f"Categorical columns: {profile['categorical_columns']}")
-    st.write(f"Text columns: {profile['text_columns']}")
+    st.write(f"Text/Object columns: {profile['text_columns']}")
+    st.write(f"Datetime columns: {profile['datetime_columns']}")
+    st.write(f"Boolean columns: {profile['boolean_columns']}")
+    st.write(f"ID-like columns: {profile['id_like_columns']}")
 
 
 def main() -> None:
