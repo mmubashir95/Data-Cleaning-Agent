@@ -1,0 +1,6 @@
+# Generated cleaning outputs
+reports/*
+!reports/.gitkeep
+
+output/*
+!output/.gitkeep

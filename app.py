@@ -15,7 +15,7 @@ from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
 from utils.ml_recommender import recommend_ml_approach
 from utils.data_profiler import profile_dataset
-from utils.report_generator import generate_cleaning_report
+from utils.report_generator import generate_cleaning_report, make_safe_stem
 from utils.data_validator import validate_dataset
 
 
@@ -203,6 +203,11 @@ def render_uploaded_dataset(
             options=cleaning_options,
             target_column=selected_target,
         )
+        cleaned_csv_name = f"cleaned_{make_safe_stem(uploaded_file.name)}.csv"
+        cleaned_csv_path = Path("output") / cleaned_csv_name
+        cleaned_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        cleaned_df.to_csv(cleaned_csv_path, index=False)
+
         cleaning_report, cleaning_report_path = generate_cleaning_report(
             profile,
             validation_result,
@@ -213,10 +218,11 @@ def render_uploaded_dataset(
 
         st.subheader("Cleaned Dataset Preview")
         st.dataframe(cleaned_df.head())
+        st.success("Cleaning completed successfully.")
         st.download_button(
             "Download Cleaned CSV",
             data=cleaned_df.to_csv(index=False).encode("utf-8"),
-            file_name="cleaned_dataset.csv",
+            file_name=cleaned_csv_name,
             mime="text/csv",
         )
         st.download_button(
@@ -225,6 +231,7 @@ def render_uploaded_dataset(
             file_name=Path(cleaning_report_path).name,
             mime="application/json",
         )
+        st.write(f"Cleaned CSV saved to: {cleaned_csv_path}")
         st.write(f"Cleaning report saved to: {cleaning_report_path}")
 
         st.subheader("Cleaning Summary")

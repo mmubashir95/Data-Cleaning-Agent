@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,13 @@ def _make_json_serializable(value: Any) -> Any:
         return [_make_json_serializable(item) for item in value]
     if isinstance(value, Path):
         return str(value)
+
+
+def make_safe_stem(file_name: str) -> str:
+    """Convert a user file name into a filesystem-safe stem."""
+    raw_stem = Path(file_name).stem.strip().lower()
+    safe_stem = re.sub(r"[^a-z0-9]+", "_", raw_stem).strip("_")
+    return safe_stem or "dataset"
 
     try:
         json.dumps(value)
@@ -66,7 +74,7 @@ def generate_cleaning_report(
     }
 
     safe_report_data = _make_json_serializable(report_data)
-    report_name = f"cleaning_report_{Path(original_file_name).stem}.json"
+    report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
     report_path = Path("reports") / report_name
     generate_report(safe_report_data, report_path)
 
