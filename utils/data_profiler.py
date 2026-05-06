@@ -69,7 +69,21 @@ def _looks_datetime(series: pd.Series, column_name: str) -> bool:
 
     parsed = pd.to_datetime(sample, errors="coerce")
     parse_ratio = parsed.notna().mean()
-    return parse_ratio >= 0.8
+    return parse_ratio >= 0.7
+
+
+def _looks_numeric_like(series: pd.Series) -> bool:
+    """Check whether an object column is mostly numeric despite dirty values."""
+    if not (is_object_dtype(series) or is_string_dtype(series)):
+        return False
+
+    non_null_values = series.dropna()
+    if non_null_values.empty:
+        return False
+
+    converted = pd.to_numeric(non_null_values.astype(str).str.strip(), errors="coerce")
+    success_ratio = converted.notna().mean()
+    return success_ratio >= 0.7
 
 
 def _is_id_like(series: pd.Series, column_name: str, row_count: int) -> bool:
@@ -137,6 +151,10 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
             classification["boolean_columns"].append(column)
             if is_numeric_dtype(series):
                 classification["numeric_columns"].append(column)
+            continue
+
+        if _looks_numeric_like(series):
+            classification["numeric_columns"].append(column)
             continue
 
         if is_numeric_dtype(series):

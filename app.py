@@ -188,6 +188,18 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
             f"{cleaning_summary['columns_where_missing_values_were_filled']}"
         )
         st.write("Converted columns:", cleaning_summary.get("converted_columns", {}))
+        st.write(
+            "Converted numeric columns:",
+            cleaning_summary.get("converted_numeric_columns", []),
+        )
+        st.write(
+            "Converted date columns:",
+            cleaning_summary.get("converted_date_columns", []),
+        )
+        st.write(
+            "Skipped type conversion columns:",
+            cleaning_summary.get("skipped_type_conversion_columns", {}),
+        )
 
         if cleaning_summary.get("converted_columns"):
             st.info(
@@ -228,6 +240,10 @@ def render_uploaded_dataset(uploaded_file, cleaning_options: dict[str, bool]) ->
         st.write("Step-by-step explanation:")
         for step in cleaning_summary["cleaning_steps"]:
             st.write(f"- {step}")
+
+        st.write("Type conversion notes:")
+        for note in cleaning_summary.get("type_conversion_notes", []):
+            st.write(f"- {note}")
 
 
 def main() -> None:

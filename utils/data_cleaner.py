@@ -24,7 +24,7 @@ def _should_convert_to_numeric(series: pd.Series) -> bool:
     as_text = non_null.astype(str).str.strip()
     converted = pd.to_numeric(as_text, errors="coerce")
     success_ratio = converted.notna().mean()
-    return success_ratio >= 0.8
+    return success_ratio >= 0.7
 
 
 def _should_convert_to_datetime(series: pd.Series, column_name: str) -> bool:
@@ -46,7 +46,7 @@ def _should_convert_to_datetime(series: pd.Series, column_name: str) -> bool:
 
     converted = pd.to_datetime(sample, errors="coerce")
     success_ratio = converted.notna().mean()
-    return success_ratio >= 0.8
+    return success_ratio >= 0.7
 
 
 def clean_dataset(
@@ -61,6 +61,10 @@ def clean_dataset(
     fix_data_types_selected = options.get("fix_data_types", False)
     missing_filled: dict[str, dict[str, str | int]] = {}
     converted_columns: dict[str, dict[str, str]] = {}
+    converted_numeric_columns: list[str] = []
+    converted_date_columns: list[str] = []
+    skipped_type_conversion_columns: dict[str, str] = {}
+    type_conversion_notes: list[str] = []
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -91,6 +95,7 @@ def clean_dataset(
                         "converted_to": "numeric",
                         "reason": "Numeric types help machine learning models work with quantitative values.",
                     }
+                    converted_numeric_columns.append(column)
                     continue
 
                 if _should_convert_to_datetime(series, column):
@@ -99,8 +104,16 @@ def clean_dataset(
                         "converted_to": "datetime",
                         "reason": "Datetime conversion makes time-based features easier to clean and engineer for ML.",
                     }
+                    converted_date_columns.append(column)
+                else:
+                    skipped_type_conversion_columns[column] = (
+                        "Skipped because the column does not look reliably numeric or date-like."
+                    )
             except Exception:
                 # Skip unsafe conversions so the app continues without crashing.
+                skipped_type_conversion_columns[column] = (
+                    "Skipped because safe type conversion failed for this column."
+                )
                 continue
 
         if converted_columns:
@@ -109,10 +122,20 @@ def clean_dataset(
             cleaning_steps.append(
                 "Type conversion helps ML because numeric and datetime values are easier to validate, clean, and transform."
             )
+            if converted_numeric_columns:
+                type_conversion_notes.append(
+                    "Converted numeric-like text columns to numeric so models can use them as quantitative features."
+                )
+            if converted_date_columns:
+                type_conversion_notes.append(
+                    "Converted date-like text columns to datetime so time information can be handled more consistently."
+                )
         else:
             cleaning_steps.append("No safe data type conversions were detected.")
+            type_conversion_notes.append("No columns met the safety threshold for type conversion.")
     else:
         cleaning_steps.append("Skipped wrong data type fixing.")
+        type_conversion_notes.append("Wrong data type fixing was not selected.")
 
     if handle_missing_values_selected:
         for column in cleaned_df.columns:
@@ -181,6 +204,10 @@ def clean_dataset(
         "missing_values_after": missing_values_after,
         "missing_filled": missing_filled,
         "converted_columns": converted_columns,
+        "converted_numeric_columns": sorted(converted_numeric_columns),
+        "converted_date_columns": sorted(converted_date_columns),
+        "skipped_type_conversion_columns": skipped_type_conversion_columns,
+        "type_conversion_notes": type_conversion_notes,
         "duplicate_rows_removed": duplicates_removed,
         "columns_where_missing_values_were_filled": filled_columns,
         "options_used": options.copy(),
