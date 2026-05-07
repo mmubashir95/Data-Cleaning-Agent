@@ -73,7 +73,7 @@ def build_sidebar():
 
 def render_cleaning_options_summary(cleaning_options: dict[str, bool]) -> None:
     """Show the selected cleaning settings on the main page."""
-    st.subheader("4. Cleaning Options")
+    st.subheader("5. Cleaning Options")
 
     selected_options = [
         ("Remove duplicates", cleaning_options.get("remove_duplicates", False)),
@@ -134,7 +134,7 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
             width="stretch",
         )
 
-    st.subheader("6. Recommended ML Algorithm")
+    st.subheader("4. Recommended ML Algorithm")
     st.success(f"Recommended problem type: {ml_recommendation['recommended_problem_type']}")
     st.write(f"Reason: {ml_recommendation['reason']}")
     st.write(f"Target Column: {ml_recommendation['target_column']}")
@@ -165,7 +165,7 @@ def render_cleaning_results(
     cleaning_report_path: str,
 ) -> None:
     """Render the post-cleaning results in clear demo-friendly sections."""
-    st.subheader("5. Cleaning Summary")
+    st.subheader("6. Cleaning Summary")
     st.success("Cleaning completed successfully.")
 
     st.write(f"Original rows: {cleaning_summary['original_rows']}")

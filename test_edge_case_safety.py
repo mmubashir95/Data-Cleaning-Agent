@@ -83,7 +83,7 @@ class TestEdgeCaseSafety(unittest.TestCase):
         app = _upload_csv("numeric_only.csv", _to_csv_bytes(df))
 
         self.assertEqual(len(app.exception), 0)
-        self.assertIn("Dataset Profiling", [element.value for element in app.subheader])
+        self.assertIn("3. Data Quality Report", [element.value for element in app.subheader])
 
     def test_text_only_dataset(self):
         df = pd.DataFrame(
@@ -107,7 +107,7 @@ class TestEdgeCaseSafety(unittest.TestCase):
         app = _upload_csv("text_only.csv", _to_csv_bytes(df))
 
         self.assertEqual(len(app.exception), 0)
-        self.assertIn("Dataset Profiling", [element.value for element in app.subheader])
+        self.assertIn("3. Data Quality Report", [element.value for element in app.subheader])
 
     def test_dataset_with_no_target_selected(self):
         df = pd.DataFrame(
@@ -123,7 +123,7 @@ class TestEdgeCaseSafety(unittest.TestCase):
             any("No target column selected" in message for message in _info_texts(app))
         )
         self.assertTrue(
-            any("Problem Type: Clustering" in message for message in _markdown_texts(app))
+            any("Recommended problem type: Clustering" in message for message in [e.body for e in app.success])
         )
 
     def test_dataset_with_no_missing_values(self):

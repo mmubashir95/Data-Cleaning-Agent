@@ -188,20 +188,20 @@ class TestValidationUI(unittest.TestCase):
 
     # ── item 1 + item 6: validation runs before profiling (execution order) ───
     def test_validation_subheader_precedes_profiling_subheader(self):
-        """Pre-Cleaning Validation must appear before Dataset Profiling."""
+        """Pre-cleaning Validation must appear before Data Quality Report."""
         at = _upload("titanic.csv", VALID_TITANIC_BYTES)
         labels = _subheader_labels(at)
-        self.assertIn("Pre-Cleaning Validation", labels)
-        self.assertIn("Dataset Profiling", labels)
+        self.assertIn("2. Pre-cleaning Validation", labels)
+        self.assertIn("3. Data Quality Report", labels)
         self.assertLess(
-            labels.index("Pre-Cleaning Validation"),
-            labels.index("Dataset Profiling"),
+            labels.index("2. Pre-cleaning Validation"),
+            labels.index("3. Data Quality Report"),
         )
 
     # ── item 2: errors stop profiling ─────────────────────────────────────────
     def test_empty_csv_error_blocks_profiling_subheader(self):
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
-        self.assertNotIn("Dataset Profiling", _subheader_labels(at))
+        self.assertNotIn("3. Data Quality Report", _subheader_labels(at))
 
     def test_empty_csv_shows_error_messages(self):
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
@@ -214,7 +214,7 @@ class TestValidationUI(unittest.TestCase):
     # ── item 3: warnings do NOT stop profiling ────────────────────────────────
     def test_one_column_warning_still_shows_profiling(self):
         at = _upload("single.csv", ONE_COLUMN_CSV_BYTES)
-        self.assertIn("Dataset Profiling", _subheader_labels(at))
+        self.assertIn("3. Data Quality Report", _subheader_labels(at))
 
     def test_one_column_shows_warning_message(self):
         at = _upload("single.csv", ONE_COLUMN_CSV_BYTES)
@@ -223,7 +223,7 @@ class TestValidationUI(unittest.TestCase):
 
     def test_fully_missing_column_warning_still_shows_profiling(self):
         at = _upload("data.csv", FULLY_MISSING_COLUMN_BYTES)
-        self.assertIn("Dataset Profiling", _subheader_labels(at))
+        self.assertIn("3. Data Quality Report", _subheader_labels(at))
 
     def test_fully_missing_column_shows_warning_message(self):
         at = _upload("data.csv", FULLY_MISSING_COLUMN_BYTES)
@@ -258,7 +258,7 @@ class TestValidationUI(unittest.TestCase):
         """When validation errors exist, profiling (and cleaning) are absent."""
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
         labels = _subheader_labels(at)
-        self.assertNotIn("Dataset Profiling", labels)
+        self.assertNotIn("3. Data Quality Report", labels)
         self.assertEqual(len(at.exception), 0)
 
     def test_validation_failure_no_exception_raised(self):
@@ -272,24 +272,24 @@ class TestValidationUI(unittest.TestCase):
         labels = _subheader_labels(at)
         successes = [e.body for e in at.success]
         self.assertTrue(any("Uploaded file" in s for s in successes), "Load stage missing")
-        self.assertIn("Pre-Cleaning Validation", labels, "Validate stage missing")
-        self.assertIn("Dataset Profiling", labels, "Profile stage missing")
+        self.assertIn("2. Pre-cleaning Validation", labels, "Validate stage missing")
+        self.assertIn("3. Data Quality Report", labels, "Profile stage missing")
 
     def test_execution_order_validate_before_profile_index(self):
         """Index of validate subheader must be strictly less than profile subheader."""
         at = _upload("titanic.csv", VALID_TITANIC_BYTES)
         labels = _subheader_labels(at)
         self.assertLess(
-            labels.index("Pre-Cleaning Validation"),
-            labels.index("Dataset Profiling"),
+            labels.index("2. Pre-cleaning Validation"),
+            labels.index("3. Data Quality Report"),
         )
 
     def test_execution_order_load_stage_present_even_when_validation_fails(self):
         """Validation still runs, but profiling does not, when the dataset is empty."""
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
         labels = _subheader_labels(at)
-        self.assertNotIn("Pre-Cleaning Validation", labels)
-        self.assertNotIn("Dataset Profiling", labels)
+        self.assertNotIn("2. Pre-cleaning Validation", labels)
+        self.assertNotIn("3. Data Quality Report", labels)
 
 
 if __name__ == "__main__":

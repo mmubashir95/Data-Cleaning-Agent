@@ -185,16 +185,16 @@ class TestTitanicComplete(unittest.TestCase):
     # R2 — validation before profiling
     def test_r2_validation_subheader_before_profiling(self):
         headers = _subheader_values(self.app)
-        self.assertIn("Pre-Cleaning Validation", headers)
-        self.assertIn("Dataset Profiling", headers)
+        self.assertIn("2. Pre-cleaning Validation", headers)
+        self.assertIn("3. Data Quality Report", headers)
         self.assertLess(
-            headers.index("Pre-Cleaning Validation"),
-            headers.index("Dataset Profiling"),
+            headers.index("2. Pre-cleaning Validation"),
+            headers.index("3. Data Quality Report"),
         )
 
     # R3 — profiling runs after validation passes
     def test_r3_profiling_subheader_visible(self):
-        self.assertIn("Dataset Profiling", _subheader_values(self.app))
+        self.assertIn("3. Data Quality Report", _subheader_values(self.app))
         self.assertTrue(
             any("Validation passed" in v for v in _success_values(self.app))
         )
@@ -222,18 +222,18 @@ class TestTitanicComplete(unittest.TestCase):
         report_path = Path("reports") / f"cleaning_report_{Path(self.FILENAME).stem}.json"
         self.assertTrue(report_path.exists(), f"Missing: {report_path}")
 
-    # R7 — file paths appear in UI (proxy for download buttons being ready)
+    # R7 — file paths appear in success messages (render_cleaning_results uses st.success)
     def test_r7_download_paths_shown_in_ui(self):
         app = _click_clean(self.app)
-        markdowns = " ".join(_markdown_values(app))
-        self.assertIn("Cleaned CSV saved to:", markdowns)
-        self.assertIn("Cleaning report saved to:", markdowns)
+        successes = " ".join(_success_values(app))
+        self.assertIn("Cleaned CSV saved to:", successes)
+        self.assertIn("Cleaning report saved to:", successes)
 
     # R8 — correct problem type
     def test_r8_problem_type_is_classification(self):
-        markdowns = _markdown_values(self.app)
+        successes = _success_values(self.app)
         self.assertTrue(
-            any(f"Problem Type: {self.EXPECTED_PROBLEM_TYPE}" in m for m in markdowns)
+            any(f"Recommended problem type: {self.EXPECTED_PROBLEM_TYPE}" in s for s in successes)
         )
 
     # R9 — correct algorithm recommendations
@@ -307,12 +307,12 @@ class TestHousePricesComplete(unittest.TestCase):
     def test_r2_validation_subheader_before_profiling(self):
         headers = _subheader_values(self.app)
         self.assertLess(
-            headers.index("Pre-Cleaning Validation"),
-            headers.index("Dataset Profiling"),
+            headers.index("2. Pre-cleaning Validation"),
+            headers.index("3. Data Quality Report"),
         )
 
     def test_r3_profiling_subheader_visible(self):
-        self.assertIn("Dataset Profiling", _subheader_values(self.app))
+        self.assertIn("3. Data Quality Report", _subheader_values(self.app))
 
     def test_r4_cleaning_produces_success_message(self):
         self.app.sidebar.checkbox[1].set_value(True).run()
@@ -334,14 +334,14 @@ class TestHousePricesComplete(unittest.TestCase):
 
     def test_r7_download_paths_shown_in_ui(self):
         app = _click_clean(self.app)
-        markdowns = " ".join(_markdown_values(app))
-        self.assertIn("Cleaned CSV saved to:", markdowns)
-        self.assertIn("Cleaning report saved to:", markdowns)
+        successes = " ".join(_success_values(app))
+        self.assertIn("Cleaned CSV saved to:", successes)
+        self.assertIn("Cleaning report saved to:", successes)
 
     def test_r8_problem_type_is_regression(self):
-        markdowns = _markdown_values(self.app)
+        successes = _success_values(self.app)
         self.assertTrue(
-            any(f"Problem Type: {self.EXPECTED_PROBLEM_TYPE}" in m for m in markdowns)
+            any(f"Recommended problem type: {self.EXPECTED_PROBLEM_TYPE}" in s for s in successes)
         )
 
     def test_r9_correct_algorithms_recommended(self):
@@ -404,12 +404,12 @@ class TestSpamSMSComplete(unittest.TestCase):
     def test_r2_validation_subheader_before_profiling(self):
         headers = _subheader_values(self.app)
         self.assertLess(
-            headers.index("Pre-Cleaning Validation"),
-            headers.index("Dataset Profiling"),
+            headers.index("2. Pre-cleaning Validation"),
+            headers.index("3. Data Quality Report"),
         )
 
     def test_r3_profiling_subheader_visible(self):
-        self.assertIn("Dataset Profiling", _subheader_values(self.app))
+        self.assertIn("3. Data Quality Report", _subheader_values(self.app))
 
     def test_r4_cleaning_produces_success_message(self):
         self.app.sidebar.checkbox[6].set_value(True).run()
@@ -431,14 +431,14 @@ class TestSpamSMSComplete(unittest.TestCase):
 
     def test_r7_download_paths_shown_in_ui(self):
         app = _click_clean(self.app)
-        markdowns = " ".join(_markdown_values(app))
-        self.assertIn("Cleaned CSV saved to:", markdowns)
-        self.assertIn("Cleaning report saved to:", markdowns)
+        successes = " ".join(_success_values(app))
+        self.assertIn("Cleaned CSV saved to:", successes)
+        self.assertIn("Cleaning report saved to:", successes)
 
     def test_r8_problem_type_is_nlp_classification(self):
-        markdowns = _markdown_values(self.app)
+        successes = _success_values(self.app)
         self.assertTrue(
-            any(f"Problem Type: {self.EXPECTED_PROBLEM_TYPE}" in m for m in markdowns)
+            any(f"Recommended problem type: {self.EXPECTED_PROBLEM_TYPE}" in s for s in successes)
         )
 
     def test_r9_correct_algorithms_recommended(self):
@@ -503,12 +503,12 @@ class TestCustomerSegmentationComplete(unittest.TestCase):
     def test_r2_validation_subheader_before_profiling(self):
         headers = _subheader_values(self.app)
         self.assertLess(
-            headers.index("Pre-Cleaning Validation"),
-            headers.index("Dataset Profiling"),
+            headers.index("2. Pre-cleaning Validation"),
+            headers.index("3. Data Quality Report"),
         )
 
     def test_r3_profiling_subheader_visible(self):
-        self.assertIn("Dataset Profiling", _subheader_values(self.app))
+        self.assertIn("3. Data Quality Report", _subheader_values(self.app))
 
     def test_r4_cleaning_produces_success_message(self):
         self.app.sidebar.checkbox[0].set_value(True).run()
@@ -530,14 +530,14 @@ class TestCustomerSegmentationComplete(unittest.TestCase):
 
     def test_r7_download_paths_shown_in_ui(self):
         app = _click_clean(self.app)
-        markdowns = " ".join(_markdown_values(app))
-        self.assertIn("Cleaned CSV saved to:", markdowns)
-        self.assertIn("Cleaning report saved to:", markdowns)
+        successes = " ".join(_success_values(app))
+        self.assertIn("Cleaned CSV saved to:", successes)
+        self.assertIn("Cleaning report saved to:", successes)
 
     def test_r8_problem_type_is_clustering(self):
-        markdowns = _markdown_values(self.app)
+        successes = _success_values(self.app)
         self.assertTrue(
-            any(f"Problem Type: {self.EXPECTED_PROBLEM_TYPE}" in m for m in markdowns)
+            any(f"Recommended problem type: {self.EXPECTED_PROBLEM_TYPE}" in s for s in successes)
         )
 
     def test_r9_correct_algorithms_recommended(self):
@@ -598,12 +598,12 @@ class TestTextNoTargetComplete(unittest.TestCase):
     def test_r2_validation_subheader_before_profiling(self):
         headers = _subheader_values(self.app)
         self.assertLess(
-            headers.index("Pre-Cleaning Validation"),
-            headers.index("Dataset Profiling"),
+            headers.index("2. Pre-cleaning Validation"),
+            headers.index("3. Data Quality Report"),
         )
 
     def test_r3_profiling_subheader_visible(self):
-        self.assertIn("Dataset Profiling", _subheader_values(self.app))
+        self.assertIn("3. Data Quality Report", _subheader_values(self.app))
 
     def test_r4_cleaning_produces_success_message(self):
         self.app.sidebar.checkbox[6].set_value(True).run()
@@ -625,19 +625,19 @@ class TestTextNoTargetComplete(unittest.TestCase):
 
     def test_r7_download_paths_shown_in_ui(self):
         app = _click_clean(self.app)
-        markdowns = " ".join(_markdown_values(app))
-        self.assertIn("Cleaned CSV saved to:", markdowns)
-        self.assertIn("Cleaning report saved to:", markdowns)
+        successes = " ".join(_success_values(app))
+        self.assertIn("Cleaned CSV saved to:", successes)
+        self.assertIn("Cleaning report saved to:", successes)
 
     # R8 + R12 — problem type must be Clustering, NOT NLP Classification
     def test_r8_and_r12_problem_type_is_clustering_not_nlp_classification(self):
-        markdowns = _markdown_values(self.app)
+        successes = _success_values(self.app)
         self.assertTrue(
-            any(f"Problem Type: {self.EXPECTED_PROBLEM_TYPE}" in m for m in markdowns),
-            "Expected 'Clustering' but did not find it in the problem type output",
+            any(f"Recommended problem type: {self.EXPECTED_PROBLEM_TYPE}" in s for s in successes),
+            "Expected 'Clustering' but did not find it in the problem type success message",
         )
         self.assertFalse(
-            any("Problem Type: NLP/Text Classification" in m for m in markdowns),
+            any("Recommended problem type: NLP/Text Classification" in s for s in successes),
             "Text-only dataset with no target was incorrectly classified as NLP/Text Classification",
         )
 
