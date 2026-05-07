@@ -67,7 +67,7 @@ def _looks_datetime(series: pd.Series, column_name: str) -> bool:
     if not (has_datetime_hint or has_date_format_hint):
         return False
 
-    parsed = pd.to_datetime(sample, errors="coerce")
+    parsed = pd.to_datetime(sample, format="mixed", errors="coerce")
     parse_ratio = parsed.notna().mean()
     return parse_ratio >= 0.7
 

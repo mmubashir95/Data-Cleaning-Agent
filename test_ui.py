@@ -67,13 +67,16 @@ class TestSidebar(unittest.TestCase):
         self.assertIn("NLP text cleaning", self._checkbox_labels())
 
     # ── scaler radio ───────────────────────────────────────────────────────────
-    def test_scaler_radio_present(self):
+    def test_scaler_radio_hidden_until_scaling_selected(self):
+        radios = self.at.sidebar.radio
+        self.assertEqual(len(radios), 0)
+
+    def test_scaler_radio_options(self):
+        self.at.sidebar.checkbox[4].set_value(True).run()
         radios = self.at.sidebar.radio
         self.assertEqual(len(radios), 1)
         self.assertEqual(radios[0].label, "Choose a scaler")
-
-    def test_scaler_radio_options(self):
-        options = list(self.at.sidebar.radio[0].options)
+        options = list(radios[0].options)
         self.assertEqual(options, ["StandardScaler", "MinMaxScaler"])
 
 
@@ -93,7 +96,7 @@ class TestMainPage(unittest.TestCase):
         infos = self.at.info
         self.assertEqual(len(infos), 1)
         self.assertIn(
-            "Upload a CSV or Excel dataset from the sidebar to get started.",
+            "No file uploaded yet. Upload a CSV or Excel dataset from the sidebar to get started.",
             infos[0].value,
         )
 

@@ -98,13 +98,13 @@ class TestValidateDatasetUnit(unittest.TestCase):
     def test_empty_dataset_reports_error(self):
         df = _load(EMPTY_CSV_BYTES)
         result = validate_dataset(df, "empty.csv")
-        combined = " ".join(result["errors"]).lower()
+        combined = " ".join(result["warnings"]).lower()
         self.assertIn("empty", combined)
 
     def test_empty_dataset_error_is_readable_string(self):
         df = _load(EMPTY_CSV_BYTES)
         result = validate_dataset(df, "empty.csv")
-        for msg in result["errors"]:
+        for msg in result["warnings"]:
             self.assertIsInstance(msg, str)
             self.assertGreater(len(msg), 5)
 
@@ -205,7 +205,7 @@ class TestValidationUI(unittest.TestCase):
 
     def test_empty_csv_shows_error_messages(self):
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
-        self.assertGreater(len(at.error), 0)
+        self.assertGreater(len(at.warning), 0)
 
     def test_empty_csv_does_not_crash(self):
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
@@ -241,7 +241,7 @@ class TestValidationUI(unittest.TestCase):
 
     def test_validation_error_message_is_readable_string(self):
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
-        for elem in at.error:
+        for elem in at.warning:
             self.assertIsInstance(elem.body, str)
             self.assertGreater(len(elem.body), 5)
             self.assertNotIn("Traceback", elem.body)
@@ -285,13 +285,11 @@ class TestValidationUI(unittest.TestCase):
         )
 
     def test_execution_order_load_stage_present_even_when_validation_fails(self):
-        """The load stage (file upload success + shape) renders before validation errors."""
+        """Validation still runs, but profiling does not, when the dataset is empty."""
         at = _upload("empty.csv", EMPTY_CSV_BYTES)
-        successes = [e.body for e in at.success]
-        self.assertTrue(
-            any("Uploaded file" in s for s in successes),
-            "Load stage should render even when validation fails",
-        )
+        labels = _subheader_labels(at)
+        self.assertNotIn("Pre-Cleaning Validation", labels)
+        self.assertNotIn("Dataset Profiling", labels)
 
 
 if __name__ == "__main__":

@@ -38,12 +38,17 @@ def generate_cleaning_report(
     cleaning_summary: dict[str, Any],
     ml_recommendation: dict[str, Any],
     original_file_name: str,
+    cleaned_file_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Build and save a single JSON cleaning report for the current workflow."""
+    report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
+    report_path = Path("reports") / report_name
+
     report_data = {
         "original_file_name": original_file_name,
         "original_rows": profile.get("rows"),
         "original_columns": profile.get("columns"),
+        "target_column": profile.get("target_column"),
         "final_rows": cleaning_summary.get("final_rows"),
         "final_columns": cleaning_summary.get("final_columns"),
         "missing_values_before_cleaning": cleaning_summary.get("missing_values_before", {}),
@@ -52,30 +57,44 @@ def generate_cleaning_report(
         "numeric_columns_detected": profile.get("numeric_columns", []),
         "categorical_columns_detected": profile.get("categorical_columns", []),
         "text_columns_detected": profile.get("text_columns", []),
+        "datetime_columns_detected": profile.get("datetime_columns", []),
+        "boolean_columns_detected": profile.get("boolean_columns", []),
+        "id_like_columns_detected": profile.get("id_like_columns", []),
         "validation_errors": validation_result.get("errors", []),
         "validation_warnings": validation_result.get("warnings", []),
         "columns_encoded": cleaning_summary.get("encoded_columns", []),
+        "encoded_columns_generated_count": cleaning_summary.get(
+            "encoded_columns_generated_count", 0
+        ),
         "columns_scaled": cleaning_summary.get("scaled_columns", []),
         "scaler_used": cleaning_summary.get("scaler_used"),
         "outlier_handling_summary": cleaning_summary.get("outlier_summary", []),
+        "target_encoding_recommendation": cleaning_summary.get("target_encoding_recommendation"),
+        "options_used": cleaning_summary.get("options_used", {}),
         "nlp_cleaning_summary": {
             "cleaned_text_columns": cleaning_summary.get("cleaned_text_columns", []),
             "nlp_cleaning_actions": cleaning_summary.get("nlp_cleaning_actions", []),
+            "backup_columns": cleaning_summary.get("nlp_original_backup_columns", []),
+            "before_after_examples": cleaning_summary.get("nlp_before_after_examples", {}),
         },
         "ml_recommendation": {
             "problem_type": ml_recommendation.get("recommended_problem_type"),
             "reason": ml_recommendation.get("reason"),
+            "target_column": ml_recommendation.get("target_column"),
+            "detected_text_column": ml_recommendation.get("detected_text_column"),
             "algorithms": ml_recommendation.get("algorithms", []),
         },
         "recommended_ml_problem_type": ml_recommendation.get("recommended_problem_type"),
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
         "cleaning_steps": cleaning_summary.get("cleaning_steps", []),
         "skipped_steps": cleaning_summary.get("skipped_steps", []),
+        "output_files": {
+            "cleaned_csv_path": cleaned_file_path,
+            "report_path": report_path,
+        },
     }
 
     safe_report_data = _make_json_serializable(report_data)
-    report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
-    report_path = Path("reports") / report_name
     generate_report(safe_report_data, report_path)
 
     return safe_report_data, str(report_path)

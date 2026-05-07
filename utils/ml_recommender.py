@@ -66,15 +66,49 @@ def _is_classification_target(series: pd.Series) -> bool:
     return unique_count <= max(10, int(len(non_null) * 0.05))
 
 
-def _is_regression_target(series: pd.Series) -> bool:
+REGRESSION_TARGET_HINTS = {
+    "price",
+    "saleprice",
+    "amount",
+    "cost",
+    "revenue",
+    "income",
+    "salary",
+    "value",
+    "score",
+    "rating",
+    "duration",
+    "time",
+    "age",
+}
+
+
+def _is_regression_target(series: pd.Series, column_name: str) -> bool:
     """Detect continuous numeric targets for regression."""
     non_null = series.dropna()
     if non_null.empty or not is_numeric_dtype(series):
         return False
 
+    normalized_name = column_name.strip().lower().replace(" ", "").replace("_", "")
     unique_count = non_null.nunique(dropna=True)
     unique_ratio = unique_count / len(non_null)
-    return unique_count > 4 and unique_ratio >= 0.5
+
+    if unique_count <= 1:
+        return False
+
+    if any(hint in normalized_name for hint in REGRESSION_TARGET_HINTS):
+        return True
+
+    target_range = non_null.max() - non_null.min()
+    looks_like_small_class_codes = (
+        unique_count <= 10 and float(target_range) <= max(10, unique_count * 2)
+    )
+    if looks_like_small_class_codes:
+        return False
+
+    return unique_count > 4 and (
+        unique_ratio >= 0.1 or float(target_range) > unique_count * 5
+    )
 
 
 def _looks_like_main_nlp_text_feature(df: pd.DataFrame, text_columns: list[str]) -> str | None:
@@ -156,7 +190,7 @@ def recommend_ml_approach(
             f"A text column was detected ({detected_text_column}) and a target column exists, "
             "so this looks like a supervised NLP task."
         )
-    elif _is_regression_target(target_series):
+    elif _is_regression_target(target_series, target_column):
         recommended_problem_type = "Regression"
         reason = "The target column is numeric and behaves like continuous data with many distinct values."
     else:

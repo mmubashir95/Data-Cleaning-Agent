@@ -158,7 +158,7 @@ def render_uploaded_dataset(
             "Column": list(profile["data_types"].keys()),
             "Data Type": list(profile["data_types"].values()),
         },
-        use_container_width=True,
+        width="stretch",
     )
 
     st.write("Missing values:")
@@ -167,7 +167,7 @@ def render_uploaded_dataset(
             "Column": list(profile["missing_values"].keys()),
             "Missing Values": list(profile["missing_values"].values()),
         },
-        use_container_width=True,
+        width="stretch",
     )
 
     st.write(f"Duplicate rows: {profile['duplicate_rows']}")
@@ -225,6 +225,7 @@ def render_uploaded_dataset(
                 cleaning_summary,
                 ml_recommendation,
                 uploaded_file.name,
+                cleaned_file_path=cleaned_csv_path,
             )
         except Exception as exc:
             st.error(f"Cleaning could not be completed safely. Details: {exc}")
@@ -342,10 +343,6 @@ def render_uploaded_dataset(
                 st.write(f"{column_name} before: {example['before']}")
                 st.write(f"{column_name} after: {example['after']}")
 
-        st.write("DEBUG - Options passed to cleaner:", cleaning_summary["options_used"])
-        st.write("DEBUG - Missing filled columns:", cleaning_summary.get("missing_filled", {}))
-        st.write("DEBUG - cleaned_df missing values:", cleaned_df.isna().sum().to_dict())
-
         if not cleaning_summary["options_used"]["handle_missing_values"]:
             st.info(
                 "Missing value handling was not selected, so missing values were not changed."
@@ -359,7 +356,7 @@ def render_uploaded_dataset(
                 "Missing Values": list(cleaning_summary["missing_values_before"].values()),
                 }
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
         st.write("Missing values after cleaning:")
@@ -370,7 +367,7 @@ def render_uploaded_dataset(
                 "Missing Values": list(cleaning_summary["missing_values_after"].values()),
                 }
             ),
-            use_container_width=True,
+            width="stretch",
         )
 
         st.write("Step-by-step explanation:")

@@ -48,7 +48,7 @@ def _should_convert_to_datetime(series: pd.Series, column_name: str) -> bool:
     if not (has_datetime_hint or has_format_hint):
         return False
 
-    converted = pd.to_datetime(sample, errors="coerce")
+    converted = pd.to_datetime(sample, format="mixed", errors="coerce")
     success_ratio = converted.notna().mean()
     return success_ratio >= 0.7
 
