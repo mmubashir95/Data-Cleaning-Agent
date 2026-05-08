@@ -12,6 +12,9 @@ FLOWISE_PREDICTION_URL = (
     "https://cloud.flowiseai.com/api/v1/prediction/"
     "6a7b5277-b4bf-4a79-a785-8cde06dbf860"
 )
+FLOWISE_UNAVAILABLE_MESSAGE = (
+    "Flowise Agent is currently unavailable. The Python cleaning report is still available."
+)
 
 
 def _to_json_safe(value: Any) -> Any:
@@ -113,7 +116,7 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
 
     This helper must not be used for actual validation, profiling, cleaning,
     or report generation. Python remains responsible for all data processing.
-    Flowise is used only as an AI explanation layer.
+    Flowise is used only as an optional AI explanation layer.
     """
     payload = {
         "question": question,
@@ -125,26 +128,28 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
     except requests.Timeout:
         return {
             "success": False,
-            "error": "The Flowise explanation service timed out. Please try again.",
+            "error": FLOWISE_UNAVAILABLE_MESSAGE,
         }
     except requests.ConnectionError:
         return {
             "success": False,
-            "error": "The Flowise explanation service could not be reached. Please check your network connection.",
+            "error": FLOWISE_UNAVAILABLE_MESSAGE,
         }
     except requests.RequestException as exc:
         return {
             "success": False,
-            "error": f"Flowise request failed: {exc}",
+            "error": FLOWISE_UNAVAILABLE_MESSAGE,
+        }
+    except Exception:
+        return {
+            "success": False,
+            "error": FLOWISE_UNAVAILABLE_MESSAGE,
         }
 
     if response.status_code != 200:
         return {
             "success": False,
-            "error": (
-                "The Flowise explanation service returned an unexpected response "
-                f"(HTTP {response.status_code})."
-            ),
+            "error": FLOWISE_UNAVAILABLE_MESSAGE,
         }
 
     try:
@@ -152,7 +157,7 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
     except ValueError:
         return {
             "success": False,
-            "error": "The Flowise explanation service returned invalid JSON.",
+            "error": FLOWISE_UNAVAILABLE_MESSAGE,
         }
 
     return {

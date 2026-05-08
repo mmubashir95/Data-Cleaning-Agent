@@ -230,6 +230,8 @@ def render_flowise_explanation_section(
             cleaning_report=cleaning_report,
         )
 
+        # Flowise is optional. If it fails, the Streamlit app should continue
+        # to provide the Python-generated profiling, cleaning summary, and downloads.
         with st.spinner("Asking Flowise Agent..."):
             result = query_flowise_agent(question, file_summary=file_summary)
 
