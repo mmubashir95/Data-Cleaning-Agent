@@ -13,7 +13,6 @@ import pandas as pd
 import streamlit as st
 
 from src.ai.flowise_client import (
-    build_flowise_combined_question,
     build_flowise_file_preview,
     query_flowise_agent,
 )
@@ -23,6 +22,45 @@ from utils.data_profiler import profile_dataset
 from utils.data_validator import validate_dataset
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report, make_safe_stem
+
+FLOWISE_CONTEXT_INSTRUCTION = (
+    "Important: the file field contains a compact text preview of the dataset "
+    "produced by the Python app, not the raw CSV or Excel file. Do not ask "
+    "for the dataset again. Do not request the full file. Use the provided "
+    "preview directly to answer. If something is missing, make a reasonable "
+    "inference and clearly label it as an inference."
+)
+
+PROMPT_TEMPLATES = {
+    "Full 25/25 Midterm Answer": (
+        "Please give me a full 25/25 midterm answer covering Part A: Agent "
+        "Development in Flowise - 10 Marks and Part B: Case Study Analysis - "
+        "15 Marks. Use the provided dataset profile."
+    ),
+    "Part A Only": (
+        "Please answer only Part A: Flowise Agent Development - 10 Marks "
+        "using this dataset profile."
+    ),
+    "Part B Only": (
+        "Please answer only Part B: Case Study Analysis - 15 Marks. "
+        "Answer all 5 case study questions in an exam-focused way."
+    ),
+    "Explain Cleaning Steps": (
+        "Explain the required data cleaning steps for this dataset. For each "
+        "step, include the issue, reason, method, Pandas/NumPy function, and "
+        "expected result."
+    ),
+    "Recommend Algorithms": (
+        "Recommend suitable ML algorithms for this dataset after cleaning. "
+        "Explain why each algorithm matches the problem type and target variable."
+    ),
+    "Short Summary": (
+        "Give me a short summary of dataset type, ML problem type, main "
+        "cleaning issues, final ML-ready output, and recommended algorithms."
+    ),
+}
+
+CUSTOM_PROMPT_OPTION = "Custom Prompt / Ask Anything"
 
 
 def build_sidebar():
@@ -161,6 +199,34 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.write(f"ID-like Columns: {ml_recommendation['id_like_columns']}")
 
 
+def build_flowise_prompt(
+    selected_prompt_type: str,
+    dataset_summary: str,
+    *,
+    custom_prompt: str | None = None,
+) -> str | None:
+    """Build the final AI prompt from reusable templates and dataset summary."""
+    if selected_prompt_type == CUSTOM_PROMPT_OPTION:
+        cleaned_custom_prompt = (custom_prompt or "").strip()
+        if not cleaned_custom_prompt:
+            return None
+        return (
+            f"{FLOWISE_CONTEXT_INSTRUCTION}\n\n"
+            "User Custom Question:\n"
+            f"{cleaned_custom_prompt}\n\n"
+            "Dataset Summary:\n"
+            f"{dataset_summary}"
+        )
+
+    selected_template = PROMPT_TEMPLATES[selected_prompt_type]
+    return (
+        f"{FLOWISE_CONTEXT_INSTRUCTION}\n\n"
+        f"{selected_template}\n\n"
+        "Dataset Summary:\n"
+        f"{dataset_summary}"
+    )
+
+
 def render_flowise_explanation_section(
     dataframe: pd.DataFrame,
     profile: dict,
@@ -174,14 +240,6 @@ def render_flowise_explanation_section(
     """Render the Flowise explanation UI using only summarized dataset context."""
     st.subheader("AI Agent Explanation")
 
-    flowise_context_instruction = (
-        "Important: the file field contains a compact text preview of the dataset "
-        "produced by the Python app, not the raw CSV or Excel file. Do not ask "
-        "for the dataset again. Do not request the full file. Use the provided "
-        "preview directly to answer. If something is missing, make a reasonable "
-        "inference and clearly label it as an inference."
-    )
-
     dataset_state_key = f"{key_prefix}_flowise_dataset_identity"
     answer_state_key = "last_flowise_answer"
     raw_response_state_key = "last_flowise_raw_response"
@@ -193,61 +251,27 @@ def render_flowise_explanation_section(
         st.session_state.pop(answer_state_key, None)
         st.session_state.pop(raw_response_state_key, None)
 
-    prompt_templates = {
-        "Full 25/25 Midterm Answer": (
-            f"{flowise_context_instruction}\n\n"
-            "Please give me a full 25/25 midterm answer covering Part A: Agent "
-            "Development in Flowise - 10 Marks and Part B: Case Study Analysis - "
-            "15 Marks. Use the provided dataset profile."
-        ),
-        "Part A Only": (
-            f"{flowise_context_instruction}\n\n"
-            "Please answer only Part A: Flowise Agent Development - 10 Marks "
-            "using this dataset profile."
-        ),
-        "Part B Only": (
-            f"{flowise_context_instruction}\n\n"
-            "Please answer only Part B: Case Study Analysis - 15 Marks. "
-            "Answer all 5 case study questions in an exam-focused way."
-        ),
-        "Explain Cleaning Steps": (
-            f"{flowise_context_instruction}\n\n"
-            "Explain the required data cleaning steps for this dataset. For each "
-            "step, include the issue, reason, method, Pandas/NumPy function, and "
-            "expected result."
-        ),
-        "Recommend Algorithms": (
-            f"{flowise_context_instruction}\n\n"
-            "Recommend suitable ML algorithms for this dataset after cleaning. "
-            "Explain why each algorithm matches the problem type and target variable."
-        ),
-        "Short Summary": (
-            f"{flowise_context_instruction}\n\n"
-            "Give me a short summary of dataset type, ML problem type, main "
-            "cleaning issues, final ML-ready output, and recommended algorithms."
-        ),
-    }
-
     selected_prompt = st.selectbox(
         "Choose AI Prompt Type",
-        options=list(prompt_templates.keys()),
+        options=[*PROMPT_TEMPLATES.keys(), CUSTOM_PROMPT_OPTION],
         key=f"{key_prefix}_flowise_prompt",
     )
 
-    question_state_key = f"{key_prefix}_flowise_question"
-    last_prompt_state_key = f"{key_prefix}_flowise_last_prompt"
-
-    if st.session_state.get(last_prompt_state_key) != selected_prompt:
-        st.session_state[question_state_key] = prompt_templates[selected_prompt]
-        st.session_state[last_prompt_state_key] = selected_prompt
-
-    # Flowise receives only a compact text preview to avoid token overflow and
-    # to ensure the Python app remains the source of truth for all data work.
-    question = st.text_area(
-        "Question for Flowise Agent",
-        height=160,
-        key=question_state_key,
-    )
+    custom_prompt_state_key = f"{key_prefix}_flowise_custom_question"
+    custom_prompt = None
+    if selected_prompt == CUSTOM_PROMPT_OPTION:
+        custom_prompt = st.text_area(
+            "Custom AI Question",
+            height=140,
+            placeholder=(
+                "Explain why Random Forest is suitable\n"
+                "Explain outlier handling in simple words\n"
+                "Generate viva questions\n"
+                "Compare Logistic Regression vs Decision Tree\n"
+                "Suggest feature engineering ideas"
+            ),
+            key=custom_prompt_state_key,
+        )
 
     try:
         # Python reads and summarizes the dataset first. Flowise receives only
@@ -273,13 +297,22 @@ def render_flowise_explanation_section(
         st.text(file_preview)
 
     if st.button("Ask Flowise Agent", key=f"{key_prefix}_ask_flowise"):
+        if selected_prompt == CUSTOM_PROMPT_OPTION and not (custom_prompt or "").strip():
+            st.warning("Please enter a custom AI question.")
+            return
+
+        outbound_question = build_flowise_prompt(
+            selected_prompt,
+            file_preview,
+            custom_prompt=custom_prompt,
+        )
+        if outbound_question is None:
+            st.warning("Please enter a custom AI question.")
+            return
 
         # Flowise is optional. If it fails, the Streamlit app should continue
         # to provide the Python-generated profiling, cleaning summary, and downloads.
         with st.spinner("Asking Flowise Agent..."):
-            # Keep the UI question box clean for the user, but send a combined
-            # prompt to Flowise so the agent sees the dataset preview inline.
-            outbound_question = build_flowise_combined_question(question, file_preview)
             result = query_flowise_agent(outbound_question, file_summary=file_preview)
 
         if not result["success"]:
