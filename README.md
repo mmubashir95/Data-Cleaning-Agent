@@ -428,6 +428,44 @@ Expected output should include:
 - Random Forest Regressor
 - Gradient Boosting Regressor
 
+### Manual Flowise Spam SMS NLP Test
+Use this manual test to verify that the Flowise explanation layer correctly identifies an NLP text classification task and prioritizes text preprocessing over generic tabular scaling advice.
+
+Test dataset columns:
+
+- `label`
+- `message`
+
+Target column:
+
+- `label`
+
+Question to Flowise:
+
+- `Analyze this NLP dataset and suggest cleaning steps and suitable ML algorithms.`
+
+Expected output should include:
+
+- Dataset type: NLP or text dataset
+- ML problem type: Text classification
+- Target column: `label`
+- Text column: `message`
+- Cleaning steps:
+- Lowercase text
+- Remove punctuation
+- Tokenize text
+- Remove stopwords
+- Optional stemming or lemmatization
+- Use TF-IDF or Bag-of-Words
+- Encode `ham` and `spam` labels
+- Use train/test split with `stratify=y`
+- Fit TF-IDF only on `X_train`
+- Recommended algorithms:
+- Naive Bayes
+- Logistic Regression
+- Linear SVM
+- It must not focus on `StandardScaler`, `MinMaxScaler`, IQR, or Z-score as the main NLP steps
+
 ## Edge Cases Handled
 - No file uploaded
 - Invalid CSV or unsupported file type
