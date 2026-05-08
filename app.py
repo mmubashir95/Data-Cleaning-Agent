@@ -172,6 +172,14 @@ def render_flowise_explanation_section(
     """Render the Flowise explanation UI using only summarized dataset context."""
     st.subheader("AI Agent Explanation")
 
+    flowise_context_instruction = (
+        "Important: the file field contains a JSON dataset summary produced by the "
+        "Python app, not the raw CSV or Excel file. Do not ask for the dataset "
+        "again. Do not request the full file. Use the provided summary directly "
+        "to answer. If something is missing, make a reasonable inference and "
+        "clearly label it as an inference."
+    )
+
     dataset_state_key = f"{key_prefix}_flowise_dataset_identity"
     answer_state_key = "last_flowise_answer"
     raw_response_state_key = "last_flowise_raw_response"
@@ -185,28 +193,34 @@ def render_flowise_explanation_section(
 
     prompt_templates = {
         "Full 25/25 Midterm Answer": (
+            f"{flowise_context_instruction}\n\n"
             "Please give me a full 25/25 midterm answer covering Part A: Agent "
             "Development in Flowise - 10 Marks and Part B: Case Study Analysis - "
             "15 Marks. Use the provided dataset profile."
         ),
         "Part A Only": (
+            f"{flowise_context_instruction}\n\n"
             "Please answer only Part A: Flowise Agent Development - 10 Marks "
             "using this dataset profile."
         ),
         "Part B Only": (
+            f"{flowise_context_instruction}\n\n"
             "Please answer only Part B: Case Study Analysis - 15 Marks. "
             "Answer all 5 case study questions in an exam-focused way."
         ),
         "Explain Cleaning Steps": (
+            f"{flowise_context_instruction}\n\n"
             "Explain the required data cleaning steps for this dataset. For each "
             "step, include the issue, reason, method, Pandas/NumPy function, and "
             "expected result."
         ),
         "Recommend Algorithms": (
+            f"{flowise_context_instruction}\n\n"
             "Recommend suitable ML algorithms for this dataset after cleaning. "
             "Explain why each algorithm matches the problem type and target variable."
         ),
         "Short Summary": (
+            f"{flowise_context_instruction}\n\n"
             "Give me a short summary of dataset type, ML problem type, main "
             "cleaning issues, final ML-ready output, and recommended algorithms."
         ),
