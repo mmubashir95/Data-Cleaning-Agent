@@ -13,7 +13,8 @@ import pandas as pd
 import streamlit as st
 
 from src.ai.flowise_client import (
-    build_flowise_dataset_summary,
+    build_flowise_combined_question,
+    build_flowise_file_preview,
     query_flowise_agent,
 )
 from utils.data_cleaner import clean_dataset
@@ -168,16 +169,17 @@ def render_flowise_explanation_section(
     cleaning_report: dict | None = None,
     key_prefix: str = "profile",
     dataset_identity: str | None = None,
+    file_name: str | None = None,
 ) -> None:
     """Render the Flowise explanation UI using only summarized dataset context."""
     st.subheader("AI Agent Explanation")
 
     flowise_context_instruction = (
-        "Important: the file field contains a JSON dataset summary produced by the "
-        "Python app, not the raw CSV or Excel file. Do not ask for the dataset "
-        "again. Do not request the full file. Use the provided summary directly "
-        "to answer. If something is missing, make a reasonable inference and "
-        "clearly label it as an inference."
+        "Important: the file field contains a compact text preview of the dataset "
+        "produced by the Python app, not the raw CSV or Excel file. Do not ask "
+        "for the dataset again. Do not request the full file. Use the provided "
+        "preview directly to answer. If something is missing, make a reasonable "
+        "inference and clearly label it as an inference."
     )
 
     dataset_state_key = f"{key_prefix}_flowise_dataset_identity"
@@ -239,7 +241,7 @@ def render_flowise_explanation_section(
         st.session_state[question_state_key] = prompt_templates[selected_prompt]
         st.session_state[last_prompt_state_key] = selected_prompt
 
-    # Flowise receives only a compact JSON summary to avoid token overflow and
+    # Flowise receives only a compact text preview to avoid token overflow and
     # to ensure the Python app remains the source of truth for all data work.
     question = st.text_area(
         "Question for Flowise Agent",
@@ -247,19 +249,38 @@ def render_flowise_explanation_section(
         key=question_state_key,
     )
 
-    if st.button("Ask Flowise Agent", key=f"{key_prefix}_ask_flowise"):
-        file_summary = build_flowise_dataset_summary(
+    try:
+        # Python reads and summarizes the dataset first. Flowise receives only
+        # this compact preview text so the explanation layer never gets the
+        # full dataset content.
+        file_preview = build_flowise_file_preview(
             dataframe,
-            profile,
-            ml_recommendation,
             target_column=target_column,
             cleaning_report=cleaning_report,
+            profile=profile,
+            ml_recommendation=ml_recommendation,
+            file_name=file_name,
+            max_rows=10,
         )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    except Exception:
+        st.error("The uploaded dataset could not be summarized for the AI agent.")
+        return
+
+    with st.expander("Preview sent to AI Agent"):
+        st.text(file_preview)
+
+    if st.button("Ask Flowise Agent", key=f"{key_prefix}_ask_flowise"):
 
         # Flowise is optional. If it fails, the Streamlit app should continue
         # to provide the Python-generated profiling, cleaning summary, and downloads.
         with st.spinner("Asking Flowise Agent..."):
-            result = query_flowise_agent(question, file_summary=file_summary)
+            # Keep the UI question box clean for the user, but send a combined
+            # prompt to Flowise so the agent sees the dataset preview inline.
+            outbound_question = build_flowise_combined_question(question, file_preview)
+            result = query_flowise_agent(outbound_question, file_summary=file_preview)
 
         if not result["success"]:
             st.error(result["error"])
@@ -495,6 +516,7 @@ def render_uploaded_dataset(
         target_column=selected_target,
         key_prefix="profile",
         dataset_identity=f"{uploaded_file.name}:{selected_target}:{dataframe.shape}",
+        file_name=uploaded_file.name,
     )
 
     if st.button("Clean Dataset"):

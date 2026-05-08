@@ -383,6 +383,9 @@ Expected output should include:
 - Random Forest
 - Includes Pandas and NumPy usage
 - Includes Part A and Part B headings
+- The question text area should not contain dataset content
+- The `Preview sent to AI Agent` expander should show only a compact Python-generated preview
+- Only the preview text, not the full dataset, should be sent to Flowise
 
 ### Manual Flowise House Prices Regression Test
 Use this manual test to verify that the Flowise explanation layer correctly identifies a regression problem and avoids treating the target as classification.

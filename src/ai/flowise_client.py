@@ -111,6 +111,136 @@ def build_flowise_dataset_summary(
     return json.dumps(_to_json_safe(summary), indent=2, default=str)
 
 
+def build_flowise_file_preview(
+    df,
+    target_column=None,
+    cleaning_report=None,
+    *,
+    profile=None,
+    ml_recommendation=None,
+    file_name: str | None = None,
+    max_rows: int = 10,
+) -> str:
+    """Build a compact text preview for Flowise from a Python-read dataset.
+
+    Python reads and summarizes the uploaded dataset first. Flowise is used only
+    as an AI explanation layer, so the full dataset is never sent. This keeps
+    prompts smaller and helps avoid token overflow on large files.
+    """
+    if df is None:
+        raise ValueError("No dataset is available to summarize for the AI agent.")
+    if df.empty:
+        raise ValueError("The uploaded dataset is empty, so no AI preview can be created.")
+
+    profile = profile or {}
+    ml_recommendation = ml_recommendation or {}
+    preview_rows = max(1, min(max_rows, 10))
+
+    # Flowise appears to respond better to raw-looking tabular text than to
+    # heavily structured JSON-like payloads. We therefore send a compact TSV
+    # preview that resembles the manual copy/paste content, while still capping
+    # it to a small number of rows to avoid token overflow.
+    sample_rows = df.head(preview_rows).copy()
+    sample_rows = sample_rows.fillna("")
+    sample_rows_text = sample_rows.to_csv(sep="\t", index=False).strip()
+
+    numeric_columns = profile.get("numeric_columns")
+    if numeric_columns is None:
+        numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
+
+    categorical_columns = profile.get("categorical_columns", [])
+    text_columns = profile.get("text_columns", [])
+    datetime_columns = profile.get("datetime_columns", [])
+    boolean_columns = profile.get("boolean_columns", [])
+    id_like_columns = profile.get("id_like_columns", [])
+
+    preview_sections = [
+        "Dataset Preview For AI Agent",
+        f"File Name: {file_name or 'Unknown'}",
+        f"Dataset Shape: {len(df)} rows x {len(df.columns)} columns",
+        f"Column Names: {list(profile.get('column_names', list(df.columns)))}",
+        f"Target Column: {target_column if target_column is not None else 'None'}",
+        f"Data Types: {_to_json_safe(profile.get('data_types', df.dtypes.astype(str).to_dict()))}",
+        f"Missing Values Summary: {_to_json_safe(profile.get('missing_values', df.isna().sum().to_dict()))}",
+        f"Duplicate Row Count: {int(profile.get('duplicate_rows', int(df.duplicated().sum())))}",
+        f"Numeric Columns: {_to_json_safe(numeric_columns)}",
+        f"Categorical Columns: {_to_json_safe(categorical_columns)}",
+        f"Text/Object Columns: {_to_json_safe(text_columns)}",
+        f"Datetime Columns: {_to_json_safe(datetime_columns)}",
+        f"Boolean Columns: {_to_json_safe(boolean_columns)}",
+        f"ID-like Columns: {_to_json_safe(id_like_columns)}",
+    ]
+
+    if ml_recommendation:
+        preview_sections.append(
+            "Recommended Problem Type: "
+            f"{ml_recommendation.get('recommended_problem_type', 'Unknown')}"
+        )
+        preview_sections.append(
+            "Recommended Algorithms: "
+            + ", ".join(
+                algorithm.get("name", str(algorithm))
+                for algorithm in ml_recommendation.get("algorithms", [])
+            )
+        )
+
+    preview_sections.extend(
+        [
+            "Dataset Content Preview (tab-separated):",
+            sample_rows_text,
+        ]
+    )
+
+    if cleaning_report is not None:
+        preview_sections.extend(
+            [
+                "Cleaning Summary:",
+                json.dumps(
+                    _to_json_safe(
+                        {
+                            "final_rows": cleaning_report.get("final_rows"),
+                            "final_columns": cleaning_report.get("final_columns"),
+                            "duplicate_rows_removed": cleaning_report.get(
+                                "duplicate_rows_removed"
+                            ),
+                            "columns_encoded": cleaning_report.get("columns_encoded", []),
+                            "columns_scaled": cleaning_report.get("columns_scaled", []),
+                            "cleaning_steps": cleaning_report.get("cleaning_steps", []),
+                            "skipped_steps": cleaning_report.get("skipped_steps", []),
+                        }
+                    ),
+                    indent=2,
+                    default=str,
+                ),
+            ]
+        )
+
+    return "\n\n".join(str(section) for section in preview_sections if section is not None)
+
+
+def build_flowise_combined_question(question: str, file_preview: str | None = None) -> str:
+    """Build the actual prompt sent to Flowise.
+
+    Some Flowise agents respond better when the dataset preview appears directly
+    inside the question text rather than relying only on a separate file field.
+    The Streamlit UI still keeps the user's question box clean; Python injects
+    the preview only in the outbound API request.
+    """
+    cleaned_question = (question or "").strip()
+    if not file_preview:
+        return cleaned_question
+
+    instruction_block = (
+        "Use the dataset preview below to answer the question. "
+        "Do not ask the user to paste the dataset again. "
+        "Do not request the full CSV or Excel file.\n\n"
+        "Dataset preview:\n"
+        f"{file_preview}\n\n"
+        "User question:\n"
+    )
+    return instruction_block + cleaned_question
+
+
 def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
     """Query Flowise for explanations using only summarized dataset context.
 
