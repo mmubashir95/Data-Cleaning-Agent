@@ -12,6 +12,10 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.ai.flowise_client import (
+    build_flowise_dataset_summary,
+    query_flowise_agent,
+)
 from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
 from utils.data_profiler import profile_dataset
@@ -154,6 +158,85 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.write(f"Boolean Columns: {ml_recommendation['boolean_columns']}")
         st.write(f"Datetime Columns: {ml_recommendation['datetime_columns']}")
         st.write(f"ID-like Columns: {ml_recommendation['id_like_columns']}")
+
+
+def render_flowise_explanation_section(
+    dataframe: pd.DataFrame,
+    profile: dict,
+    ml_recommendation: dict,
+    target_column: str | None = None,
+    cleaning_report: dict | None = None,
+    key_prefix: str = "profile",
+) -> None:
+    """Render the Flowise explanation UI using only summarized dataset context."""
+    st.subheader("AI Agent Explanation")
+
+    prompt_templates = {
+        "Full 25/25 Midterm Answer": (
+            "Please analyze this dataset and give an exam-focused data cleaning answer. "
+            "Include dataset type, ML problem type, data quality issues, cleaning steps, "
+            "Pandas/NumPy usage, final ML-ready output, and suitable algorithms."
+        ),
+        "Part A Only": (
+            "Please answer Part A only for this dataset. Explain the dataset type, likely "
+            "ML problem type, major quality issues, and why validation and profiling matter."
+        ),
+        "Part B Only": (
+            "Please answer Part B only for this dataset. Explain the cleaning steps, "
+            "Pandas/NumPy usage, final ML-ready output, and expected report outputs."
+        ),
+        "Explain Cleaning Steps": (
+            "Please explain the recommended data cleaning steps for this dataset in a clear, "
+            "exam-friendly way."
+        ),
+        "Recommend Algorithms": (
+            "Please recommend suitable machine learning algorithms for this dataset and explain "
+            "why they fit the detected problem type."
+        ),
+        "Short Summary": (
+            "Please give a short summary of this dataset, its likely ML problem type, key data "
+            "quality issues, and the most important cleaning actions."
+        ),
+    }
+
+    selected_prompt = st.selectbox(
+        "Quick Prompt",
+        options=list(prompt_templates.keys()),
+        key=f"{key_prefix}_flowise_prompt",
+    )
+
+    question_state_key = f"{key_prefix}_flowise_question"
+    last_prompt_state_key = f"{key_prefix}_flowise_last_prompt"
+
+    if st.session_state.get(last_prompt_state_key) != selected_prompt:
+        st.session_state[question_state_key] = prompt_templates[selected_prompt]
+        st.session_state[last_prompt_state_key] = selected_prompt
+
+    # Flowise receives only a compact JSON summary to avoid token overflow and
+    # to ensure the Python app remains the source of truth for all data work.
+    question = st.text_area(
+        "Question for Flowise Agent",
+        height=160,
+        key=question_state_key,
+    )
+
+    if st.button("Ask Flowise Agent", key=f"{key_prefix}_ask_flowise"):
+        file_summary = build_flowise_dataset_summary(
+            dataframe,
+            profile,
+            ml_recommendation,
+            target_column=target_column,
+            cleaning_report=cleaning_report,
+        )
+
+        with st.spinner("Asking Flowise Agent..."):
+            result = query_flowise_agent(question, file_summary=file_summary)
+
+        if not result["success"]:
+            st.error(result["error"])
+            return
+
+        st.markdown(result["answer"])
 
 
 def render_cleaning_results(
@@ -358,6 +441,13 @@ def render_uploaded_dataset(
 
     render_data_quality_report(profile, ml_recommendation)
     render_cleaning_options_summary(cleaning_options)
+    render_flowise_explanation_section(
+        dataframe,
+        profile,
+        ml_recommendation,
+        target_column=selected_target,
+        key_prefix="profile",
+    )
 
     if st.button("Clean Dataset"):
         try:
