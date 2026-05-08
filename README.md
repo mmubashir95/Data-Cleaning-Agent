@@ -322,6 +322,21 @@ Recommended test cases for demonstration and verification:
 
 This repository also includes automated test files covering validation behavior, profiling, upload flow, UI behavior, workflow execution, and edge-case safety.
 
+### Manual Flowise Greeting Test
+Use this simple manual smoke test to confirm that the Flowise explanation layer is reachable even without dataset context.
+
+Test input:
+
+- Question: `Hey, what do you do?`
+
+Expected result:
+
+- Flowise API call succeeds
+- Streamlit displays the returned answer
+- No dataset summary is required for this test
+- A valid response may look like:
+  `I am a Data Cleaning Agent. I help analyze datasets and suggest cleaning steps for machine learning preparation.`
+
 ## Edge Cases Handled
 - No file uploaded
 - Invalid CSV or unsupported file type
