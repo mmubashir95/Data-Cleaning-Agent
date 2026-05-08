@@ -384,6 +384,50 @@ Expected output should include:
 - Includes Pandas and NumPy usage
 - Includes Part A and Part B headings
 
+### Manual Flowise House Prices Regression Test
+Use this manual test to verify that the Flowise explanation layer correctly identifies a regression problem and avoids treating the target as classification.
+
+Test dataset columns:
+
+- `Id`
+- `LotArea`
+- `OverallQual`
+- `YearBuilt`
+- `TotalBsmtSF`
+- `GrLivArea`
+- `BedroomAbvGr`
+- `GarageCars`
+- `GarageArea`
+- `Neighborhood`
+- `HouseStyle`
+- `SalePrice`
+
+Target column:
+
+- `SalePrice`
+
+Question to Flowise:
+
+- `Analyze this dataset and recommend cleaning steps and suitable ML algorithms.`
+
+Expected output should include:
+
+- Dataset type: Tabular dataset
+- ML problem type: Regression
+- Target column: `SalePrice`
+- It must not say classification
+- It must not mention class imbalance as a main issue
+- Cleaning steps:
+- Fill numeric missing values with median
+- Fill categorical missing values with mode or `Unknown`
+- Encode `Neighborhood` and `HouseStyle`
+- Check outliers in `LotArea`, `GrLivArea`, and `SalePrice`
+- Consider `np.log1p` for skewed `SalePrice`
+- Recommended algorithms:
+- Linear Regression
+- Random Forest Regressor
+- Gradient Boosting Regressor
+
 ## Edge Cases Handled
 - No file uploaded
 - Invalid CSV or unsupported file type
