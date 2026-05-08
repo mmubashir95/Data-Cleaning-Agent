@@ -238,6 +238,8 @@ def render_flowise_explanation_section(
             return
 
         st.markdown(result["answer"])
+        with st.expander("Raw Flowise Response"):
+            st.json(result["raw_response"])
 
 
 def render_cleaning_results(

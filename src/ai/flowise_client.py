@@ -36,16 +36,13 @@ def _to_json_safe(value: Any) -> Any:
     return value
 
 
-def _extract_answer(response_json: Any) -> str:
-    """Best-effort extraction of a readable answer from Flowise JSON."""
-    if isinstance(response_json, dict):
-        for key in ("text", "answer", "response", "output", "message"):
-            value = response_json.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    if isinstance(response_json, str) and response_json.strip():
-        return response_json.strip()
-    return "Flowise returned a response, but no readable answer field was found."
+def extract_flowise_answer(response_json: dict) -> str:
+    """Extract the clean answer text from a Flowise JSON response."""
+    for key in ("text", "answer", "result", "output", "response"):
+        value = response_json.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return json.dumps(response_json, indent=2, default=str)
 
 
 def build_flowise_dataset_summary(
@@ -160,6 +157,6 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
 
     return {
         "success": True,
-        "answer": _extract_answer(response_json),
+        "answer": extract_flowise_answer(response_json),
         "raw_response": response_json,
     }
