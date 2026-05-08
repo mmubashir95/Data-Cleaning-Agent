@@ -466,6 +466,37 @@ Expected output should include:
 - Linear SVM
 - It must not focus on `StandardScaler`, `MinMaxScaler`, IQR, or Z-score as the main NLP steps
 
+### Manual Flowise No-Target Clustering Test
+Use this manual test to verify that the Flowise explanation layer correctly identifies an unsupervised clustering problem when no target column is provided.
+
+Test dataset columns:
+
+- `CustomerID`
+- `Age`
+- `Income`
+- `SpendingScore`
+- `PurchaseFrequency`
+
+Target column:
+
+- `None`
+
+Question to Flowise:
+
+- `Analyze this dataset. No target column is provided. What is the correct ML problem type?`
+
+Expected output should include:
+
+- Problem type: Clustering or unsupervised learning
+- Reason: no target column is provided and the goal is grouping similar records
+- `CustomerID` should be removed or excluded as an identifier
+- Missing numeric values should be filled with median
+- Numeric features should be scaled
+- Recommended algorithms:
+- K-Means
+- DBSCAN
+- It should ask for a target column if the user wants classification or regression
+
 ## Edge Cases Handled
 - No file uploaded
 - Invalid CSV or unsupported file type
