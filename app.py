@@ -240,6 +240,13 @@ def render_flowise_explanation_section(
             return
 
         st.markdown(result["answer"])
+        st.download_button(
+            "Download AI Explanation",
+            data=result["answer"],
+            file_name="flowise_ai_explanation.md",
+            mime="text/markdown",
+            key=f"{key_prefix}_download_flowise_answer",
+        )
         with st.expander("Raw Flowise Response"):
             st.json(result["raw_response"])
 
