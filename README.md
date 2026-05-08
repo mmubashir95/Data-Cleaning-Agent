@@ -337,6 +337,53 @@ Expected result:
 - A valid response may look like:
   `I am a Data Cleaning Agent. I help analyze datasets and suggest cleaning steps for machine learning preparation.`
 
+### Manual Flowise Titanic Classification Test
+Use this manual test to verify that the Flowise explanation layer produces an exam-focused classification answer from the summarized Titanic dataset profile.
+
+Test dataset columns:
+
+- `PassengerId`
+- `Survived`
+- `Pclass`
+- `Name`
+- `Sex`
+- `Age`
+- `SibSp`
+- `Parch`
+- `Ticket`
+- `Fare`
+- `Cabin`
+- `Embarked`
+
+Target column:
+
+- `Survived`
+
+Question to Flowise:
+
+- `Please give me a full 25/25 midterm answer covering Part A: Agent Development in Flowise - 10 Marks and Part B: Case Study Analysis - 15 Marks.`
+
+Expected output should include:
+
+- Dataset type: Tabular dataset
+- ML problem type: Binary classification
+- Target column: `Survived`
+- Cleaning steps:
+- Fill `Age` using median
+- Fill `Embarked` using mode
+- Drop `Cabin` or create `has_cabin`
+- Remove duplicates
+- Fix wrong data types
+- Check outliers in `Age` and `Fare`
+- Encode `Sex` and `Embarked`
+- Scale `Age` and `Fare` if using Logistic Regression
+- Recommended algorithms:
+- Logistic Regression
+- Decision Tree
+- Random Forest
+- Includes Pandas and NumPy usage
+- Includes Part A and Part B headings
+
 ## Edge Cases Handled
 - No file uploaded
 - Invalid CSV or unsupported file type
