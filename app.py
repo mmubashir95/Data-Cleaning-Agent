@@ -167,9 +167,21 @@ def render_flowise_explanation_section(
     target_column: str | None = None,
     cleaning_report: dict | None = None,
     key_prefix: str = "profile",
+    dataset_identity: str | None = None,
 ) -> None:
     """Render the Flowise explanation UI using only summarized dataset context."""
     st.subheader("AI Agent Explanation")
+
+    dataset_state_key = f"{key_prefix}_flowise_dataset_identity"
+    answer_state_key = "last_flowise_answer"
+    raw_response_state_key = "last_flowise_raw_response"
+
+    # Clear stale Flowise output when the active dataset changes so a previous
+    # explanation is not shown for a different upload.
+    if st.session_state.get(dataset_state_key) != dataset_identity:
+        st.session_state[dataset_state_key] = dataset_identity
+        st.session_state.pop(answer_state_key, None)
+        st.session_state.pop(raw_response_state_key, None)
 
     prompt_templates = {
         "Full 25/25 Midterm Answer": (
@@ -239,16 +251,25 @@ def render_flowise_explanation_section(
             st.error(result["error"])
             return
 
-        st.markdown(result["answer"])
+        st.session_state[answer_state_key] = result["answer"]
+        st.session_state[raw_response_state_key] = result.get("raw_response")
+
+    last_answer = st.session_state.get(answer_state_key)
+    last_raw_response = st.session_state.get(raw_response_state_key)
+
+    if last_answer:
+        st.markdown(last_answer)
         st.download_button(
             "Download AI Explanation",
-            data=result["answer"],
+            data=last_answer,
             file_name="flowise_ai_explanation.md",
             mime="text/markdown",
             key=f"{key_prefix}_download_flowise_answer",
         )
+
+    if last_raw_response:
         with st.expander("Raw Flowise Response"):
-            st.json(result["raw_response"])
+            st.json(last_raw_response)
 
 
 def render_cleaning_results(
@@ -459,6 +480,7 @@ def render_uploaded_dataset(
         ml_recommendation,
         target_column=selected_target,
         key_prefix="profile",
+        dataset_identity=f"{uploaded_file.name}:{selected_target}:{dataframe.shape}",
     )
 
     if st.button("Clean Dataset"):
