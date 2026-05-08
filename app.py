@@ -173,34 +173,35 @@ def render_flowise_explanation_section(
 
     prompt_templates = {
         "Full 25/25 Midterm Answer": (
-            "Please analyze this dataset and give an exam-focused data cleaning answer. "
-            "Include dataset type, ML problem type, data quality issues, cleaning steps, "
-            "Pandas/NumPy usage, final ML-ready output, and suitable algorithms."
+            "Please give me a full 25/25 midterm answer covering Part A: Agent "
+            "Development in Flowise - 10 Marks and Part B: Case Study Analysis - "
+            "15 Marks. Use the provided dataset profile."
         ),
         "Part A Only": (
-            "Please answer Part A only for this dataset. Explain the dataset type, likely "
-            "ML problem type, major quality issues, and why validation and profiling matter."
+            "Please answer only Part A: Flowise Agent Development - 10 Marks "
+            "using this dataset profile."
         ),
         "Part B Only": (
-            "Please answer Part B only for this dataset. Explain the cleaning steps, "
-            "Pandas/NumPy usage, final ML-ready output, and expected report outputs."
+            "Please answer only Part B: Case Study Analysis - 15 Marks. "
+            "Answer all 5 case study questions in an exam-focused way."
         ),
         "Explain Cleaning Steps": (
-            "Please explain the recommended data cleaning steps for this dataset in a clear, "
-            "exam-friendly way."
+            "Explain the required data cleaning steps for this dataset. For each "
+            "step, include the issue, reason, method, Pandas/NumPy function, and "
+            "expected result."
         ),
         "Recommend Algorithms": (
-            "Please recommend suitable machine learning algorithms for this dataset and explain "
-            "why they fit the detected problem type."
+            "Recommend suitable ML algorithms for this dataset after cleaning. "
+            "Explain why each algorithm matches the problem type and target variable."
         ),
         "Short Summary": (
-            "Please give a short summary of this dataset, its likely ML problem type, key data "
-            "quality issues, and the most important cleaning actions."
+            "Give me a short summary of dataset type, ML problem type, main "
+            "cleaning issues, final ML-ready output, and recommended algorithms."
         ),
     }
 
     selected_prompt = st.selectbox(
-        "Quick Prompt",
+        "Choose AI Prompt Type",
         options=list(prompt_templates.keys()),
         key=f"{key_prefix}_flowise_prompt",
     )
