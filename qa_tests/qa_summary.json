@@ -1,0 +1,101 @@
+[
+  {
+    "test_id": 1,
+    "test_name": "Titanic Classification",
+    "dataset_file": "titanic.csv",
+    "overall_pass": true,
+    "checks_passed": 19,
+    "checks_total": 19,
+    "elapsed_seconds": 0.213,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 2,
+    "test_name": "House Prices Regression",
+    "dataset_file": "house_prices.csv",
+    "overall_pass": true,
+    "checks_passed": 16,
+    "checks_total": 16,
+    "elapsed_seconds": 0.475,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 3,
+    "test_name": "Spam SMS NLP Classification",
+    "dataset_file": "spam_sms.csv",
+    "overall_pass": true,
+    "checks_passed": 15,
+    "checks_total": 15,
+    "elapsed_seconds": 0.046,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 4,
+    "test_name": "Customer Segmentation (No Target)",
+    "dataset_file": "customer_segmentation.csv",
+    "overall_pass": true,
+    "checks_passed": 12,
+    "checks_total": 12,
+    "elapsed_seconds": 0.072,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 5,
+    "test_name": "No Missing Values Dataset",
+    "dataset_file": "no_missing_values.csv",
+    "overall_pass": true,
+    "checks_passed": 11,
+    "checks_total": 11,
+    "elapsed_seconds": 0.056,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 6,
+    "test_name": "Dataset with Duplicate Rows",
+    "dataset_file": "duplicate_rows.csv",
+    "overall_pass": true,
+    "checks_passed": 11,
+    "checks_total": 11,
+    "elapsed_seconds": 0.066,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 7,
+    "test_name": "No Numeric Columns Dataset",
+    "dataset_file": "no_numeric_columns.csv",
+    "overall_pass": true,
+    "checks_passed": 11,
+    "checks_total": 11,
+    "elapsed_seconds": 0.081,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 8,
+    "test_name": "Invalid CSV Format",
+    "dataset_file": "invalid_csv.csv",
+    "overall_pass": true,
+    "checks_passed": 9,
+    "checks_total": 9,
+    "elapsed_seconds": 0.013,
+    "error": null,
+    "failed_checks": []
+  },
+  {
+    "test_id": 9,
+    "test_name": "Large CSV File (10k rows)",
+    "dataset_file": "large_dataset.csv",
+    "overall_pass": true,
+    "checks_passed": 15,
+    "checks_total": 15,
+    "elapsed_seconds": 0.55,
+    "error": null,
+    "failed_checks": []
+  }
+]
