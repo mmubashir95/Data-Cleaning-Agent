@@ -116,7 +116,7 @@ def build_sidebar():
 
 def render_cleaning_options_summary(cleaning_options: dict[str, bool]) -> None:
     """Show the selected cleaning settings on the main page."""
-    st.subheader("5. Cleaning Options")
+    st.subheader("6. Cleaning Options")
 
     selected_options = [
         ("Remove duplicates", cleaning_options.get("remove_duplicates", False)),
@@ -138,16 +138,18 @@ def render_cleaning_options_summary(cleaning_options: dict[str, bool]) -> None:
         st.write(f"Scaler selected: {cleaning_options.get('scaler_choice')}")
 
 
-def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
-    """Show a beginner-friendly data quality summary and ML recommendation."""
-    st.subheader("3. Data Quality Report")
+def render_dataset_profile(profile: dict) -> None:
+    """Show a beginner-friendly dataset profiling section before cleaning."""
+    st.subheader("3. Dataset Profile")
 
     metric_columns = st.columns(3)
     metric_columns[0].metric("Rows", profile["rows"])
     metric_columns[1].metric("Columns", profile["columns"])
     metric_columns[2].metric("Duplicate Rows", profile["duplicate_rows"])
 
-    st.write(f"Target column: {profile['target_column']}")
+    st.write("Column names:")
+    st.write(profile["column_names"])
+
     st.write(f"Numeric columns: {profile['numeric_columns']}")
     st.write(f"Categorical columns: {profile['categorical_columns']}")
     st.write(f"Text/Object columns: {profile['text_columns']}")
@@ -155,10 +157,7 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     st.write(f"Boolean columns: {profile['boolean_columns']}")
     st.write(f"ID-like columns: {profile['id_like_columns']}")
 
-    with st.expander("View detailed profiling tables"):
-        st.write("Column names:")
-        st.write(profile["column_names"])
-
+    with st.expander("View detailed dataset profile"):
         st.write("Data types:")
         st.dataframe(
             {
@@ -177,7 +176,25 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
             width="stretch",
         )
 
-    st.subheader("4. Recommended ML Algorithm")
+    if any(value > 0 for value in profile["missing_values"].values()):
+        st.info("Some columns have missing values. Review them before cleaning.")
+    else:
+        st.info("No missing values were detected in this dataset.")
+
+
+def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
+    """Show a beginner-friendly data quality summary and ML recommendation."""
+    st.subheader("4. Data Quality Report")
+
+    st.write(f"Target column: {profile['target_column']}")
+    st.write(f"Duplicate rows detected: {profile['duplicate_rows']}")
+
+    columns_with_missing_values = [
+        column for column, count in profile["missing_values"].items() if count > 0
+    ]
+    st.write(f"Columns with missing values: {columns_with_missing_values}")
+
+    st.subheader("5. Recommended ML Algorithm")
     st.success(f"Recommended problem type: {ml_recommendation['recommended_problem_type']}")
     st.write(f"Reason: {ml_recommendation['reason']}")
     st.write(f"Target Column: {ml_recommendation['target_column']}")
@@ -349,7 +366,7 @@ def render_cleaning_results(
     cleaning_report_path: str,
 ) -> None:
     """Render the post-cleaning results in clear demo-friendly sections."""
-    st.subheader("6. Cleaning Summary")
+    st.subheader("7. Cleaning Summary")
     st.success("Cleaning completed successfully.")
 
     st.write(f"Original rows: {cleaning_summary['original_rows']}")
@@ -453,7 +470,7 @@ def render_cleaning_results(
                 st.write(f"{column_name} before: {example['before']}")
                 st.write(f"{column_name} after: {example['after']}")
 
-    st.subheader("7. Download Output Files")
+    st.subheader("8. Download Output Files")
     st.download_button(
         "Download Cleaned CSV",
         data=cleaned_df.to_csv(index=False).encode("utf-8"),
@@ -540,6 +557,7 @@ def render_uploaded_dataset(
         text_columns=profile["text_columns"],
     )
 
+    render_dataset_profile(profile)
     render_data_quality_report(profile, ml_recommendation)
     render_cleaning_options_summary(cleaning_options)
     render_flowise_explanation_section(
