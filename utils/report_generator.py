@@ -43,6 +43,59 @@ def generate_cleaning_report(
     """Build and save a single JSON cleaning report for the current workflow."""
     report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
     report_path = Path("reports") / report_name
+    options_used = cleaning_summary.get("options_used", {})
+    missing_filled = cleaning_summary.get("missing_filled", {})
+    converted_columns = cleaning_summary.get("converted_columns", {})
+    outlier_summary = cleaning_summary.get("outlier_summary", [])
+    encoded_columns = cleaning_summary.get("encoded_columns", [])
+    scaled_columns = cleaning_summary.get("scaled_columns", [])
+    cleaned_text_columns = cleaning_summary.get("cleaned_text_columns", [])
+
+    cleaning_actions = {
+        "duplicates_removed": {
+            "selected": options_used.get("remove_duplicates", False),
+            "performed": cleaning_summary.get("duplicate_rows_removed", 0) > 0,
+            "rows_removed": cleaning_summary.get("duplicate_rows_removed", 0),
+        },
+        "missing_values_handled": {
+            "selected": options_used.get("handle_missing_values", False),
+            "performed": bool(missing_filled),
+            "columns_handled": sorted(missing_filled.keys()),
+            "details": missing_filled,
+        },
+        "wrong_data_types_fixed": {
+            "selected": options_used.get("fix_data_types", False),
+            "performed": bool(converted_columns),
+            "columns_fixed": sorted(converted_columns.keys()),
+            "details": converted_columns,
+        },
+        "outliers_detected_and_handled": {
+            "selected": options_used.get("handle_outliers", False),
+            "performed": bool(outlier_summary),
+            "columns_handled": [item.get("column_name") for item in outlier_summary],
+            "details": outlier_summary,
+        },
+        "categorical_columns_encoded": {
+            "selected": options_used.get("encode_categorical", False),
+            "performed": bool(encoded_columns),
+            "columns_encoded": encoded_columns,
+            "generated_columns_count": cleaning_summary.get(
+                "encoded_columns_generated_count", 0
+            ),
+        },
+        "numeric_columns_scaled": {
+            "selected": options_used.get("scale_numeric", False),
+            "performed": bool(scaled_columns),
+            "scaler_used": cleaning_summary.get("scaler_used"),
+            "columns_scaled": scaled_columns,
+        },
+        "nlp_text_cleaning_applied": {
+            "selected": options_used.get("nlp_cleaning", False),
+            "performed": bool(cleaned_text_columns),
+            "columns_cleaned": cleaned_text_columns,
+            "details": cleaning_summary.get("nlp_cleaning_actions", []),
+        },
+    }
 
     report_data = {
         "original_file_name": original_file_name,
@@ -62,17 +115,18 @@ def generate_cleaning_report(
         "id_like_columns_detected": profile.get("id_like_columns", []),
         "validation_errors": validation_result.get("errors", []),
         "validation_warnings": validation_result.get("warnings", []),
-        "columns_encoded": cleaning_summary.get("encoded_columns", []),
+        "columns_encoded": encoded_columns,
         "encoded_columns_generated_count": cleaning_summary.get(
             "encoded_columns_generated_count", 0
         ),
-        "columns_scaled": cleaning_summary.get("scaled_columns", []),
+        "columns_scaled": scaled_columns,
         "scaler_used": cleaning_summary.get("scaler_used"),
-        "outlier_handling_summary": cleaning_summary.get("outlier_summary", []),
+        "outlier_handling_summary": outlier_summary,
         "target_encoding_recommendation": cleaning_summary.get("target_encoding_recommendation"),
-        "options_used": cleaning_summary.get("options_used", {}),
+        "options_used": options_used,
+        "cleaning_actions": cleaning_actions,
         "nlp_cleaning_summary": {
-            "cleaned_text_columns": cleaning_summary.get("cleaned_text_columns", []),
+            "cleaned_text_columns": cleaned_text_columns,
             "nlp_cleaning_actions": cleaning_summary.get("nlp_cleaning_actions", []),
             "backup_columns": cleaning_summary.get("nlp_original_backup_columns", []),
             "before_after_examples": cleaning_summary.get("nlp_before_after_examples", {}),
