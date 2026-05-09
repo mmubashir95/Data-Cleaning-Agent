@@ -7,8 +7,10 @@ streamlit run app.py
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -73,6 +75,10 @@ PROMPT_TEMPLATES = {
 }
 
 CUSTOM_PROMPT_OPTION = "Custom Prompt / Ask Anything"
+MAX_VISUALIZATION_ROWS = 5000
+MAX_HEATMAP_COLUMNS = 12
+MAX_BOXPLOT_COLUMNS = 12
+MAX_WORDS_IN_CHART = 10
 
 
 def build_sidebar():
@@ -195,23 +201,45 @@ def render_dataset_profile(profile: dict) -> None:
 
 
 def _render_missing_values_chart(dataframe: pd.DataFrame) -> None:
-    """Render a missing values bar chart or a friendly skip message."""
+    """Render a missing values chart with counts and percentages."""
     missing_counts = dataframe.isnull().sum()
     missing_counts = missing_counts[missing_counts > 0].sort_values(ascending=False)
+    total_rows = max(len(dataframe), 1)
 
-    with st.expander("Missing Values Bar Chart"):
+    with st.expander("Missing Values Bar Chart", expanded=False):
         if missing_counts.empty:
             st.info("Skipped missing values chart because no missing values were detected before cleaning.")
             return
 
-        missing_chart_data = (
-            missing_counts.rename_axis("column")
-            .reset_index(name="missing_values")
+        missing_chart_data = missing_counts.rename_axis("column").reset_index(name="missing_values")
+        missing_chart_data["missing_percentage"] = (
+            (missing_chart_data["missing_values"] / total_rows) * 100
         )
-        st.bar_chart(
-            missing_chart_data.set_index("column")["missing_values"],
+        chart = (
+            alt.Chart(missing_chart_data)
+            .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#d97706")
+            .encode(
+                x=alt.X("missing_values:Q", title="Missing Value Count"),
+                y=alt.Y("column:N", sort="-x", title="Column"),
+                tooltip=[
+                    alt.Tooltip("column:N", title="Column"),
+                    alt.Tooltip("missing_values:Q", title="Missing Values"),
+                    alt.Tooltip("missing_percentage:Q", title="Missing %", format=".1f"),
+                ],
+            )
+            .properties(height=max(220, len(missing_chart_data) * 32), title="Columns With Missing Values")
         )
-        st.caption("This chart highlights which columns have the most missing values before cleaning.")
+        labels = (
+            alt.Chart(missing_chart_data)
+            .mark_text(align="left", baseline="middle", dx=6, color="#374151")
+            .encode(
+                x=alt.X("missing_values:Q"),
+                y=alt.Y("column:N", sort="-x"),
+                text=alt.Text("missing_percentage:Q", format=".1f"),
+            )
+        )
+        st.altair_chart(chart + labels, use_container_width=True)
+        st.caption("Only columns with missing values are shown. Labels indicate the percentage of missing entries.")
 
 
 def _render_target_distribution_chart(
@@ -219,7 +247,7 @@ def _render_target_distribution_chart(
     target_column: str | None,
 ) -> None:
     """Render a target/class distribution chart when it is meaningful."""
-    with st.expander("Target/Class Distribution Chart"):
+    with st.expander("Target/Class Distribution Chart", expanded=False):
         if target_column is None:
             st.info("Skipped target distribution chart because no target column was selected.")
             return
@@ -242,9 +270,20 @@ def _render_target_distribution_chart(
             .rename_axis("target_value")
             .reset_index(name="count")
         )
-        st.bar_chart(
-            target_counts.set_index("target_value")["count"],
+        chart = (
+            alt.Chart(target_counts)
+            .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color="#0f766e")
+            .encode(
+                x=alt.X("target_value:N", title="Target / Class Value", sort="-y"),
+                y=alt.Y("count:Q", title="Record Count"),
+                tooltip=[
+                    alt.Tooltip("target_value:N", title="Value"),
+                    alt.Tooltip("count:Q", title="Count"),
+                ],
+            )
+            .properties(height=320, title="Target or Class Distribution")
         )
+        st.altair_chart(chart, use_container_width=True)
         st.caption("This chart shows how the selected target or class values are distributed.")
 
 
@@ -257,22 +296,41 @@ def _render_numeric_boxplot(dataframe: pd.DataFrame) -> None:
             st.info("Skipped numeric boxplot because this dataset has no numeric columns.")
             return
 
-        numeric_long = numeric_df.melt(var_name="column", value_name="value").dropna()
+        sampled_numeric_df, sample_note = _sample_dataframe_for_visuals(
+            numeric_df,
+            max_rows=MAX_VISUALIZATION_ROWS,
+        )
+        plot_columns = list(sampled_numeric_df.columns[:MAX_BOXPLOT_COLUMNS])
+        numeric_long = (
+            sampled_numeric_df.loc[:, plot_columns]
+            .melt(var_name="column", value_name="value")
+            .dropna()
+        )
         if numeric_long.empty:
             st.info("Skipped numeric boxplot because the numeric columns do not contain plottable values.")
             return
 
-        st.vega_lite_chart(
-            numeric_long,
-            {
-                "mark": {"type": "boxplot", "extent": 1.5},
-                "encoding": {
-                    "x": {"field": "column", "type": "nominal", "title": "Numeric Column"},
-                    "y": {"field": "value", "type": "quantitative", "title": "Value"},
-                    "color": {"field": "column", "type": "nominal", "legend": None},
-                },
-            },
+        chart = (
+            alt.Chart(numeric_long)
+            .mark_boxplot(extent=1.5, size=28)
+            .encode(
+                x=alt.X("column:N", title="Numeric Column", axis=alt.Axis(labelAngle=-35)),
+                y=alt.Y("value:Q", title="Value"),
+                color=alt.Color("column:N", legend=None),
+                tooltip=[
+                    alt.Tooltip("column:N", title="Column"),
+                    alt.Tooltip("value:Q", title="Value"),
+                ],
+            )
+            .properties(height=420, title="Numeric Feature Spread and Potential Outliers")
         )
+        st.altair_chart(chart, use_container_width=True)
+        if len(numeric_df.columns) > len(plot_columns):
+            st.caption(
+                f"Showing the first {len(plot_columns)} numeric columns to keep the view readable."
+            )
+        if sample_note:
+            st.caption(sample_note)
         st.caption("Boxplots help spot spread, median values, and possible outliers in numeric columns.")
 
 
@@ -280,12 +338,17 @@ def _render_correlation_heatmap(dataframe: pd.DataFrame) -> None:
     """Render a numeric correlation heatmap or a skip message."""
     numeric_df = dataframe.select_dtypes(include=["number"])
 
-    with st.expander("Correlation Heatmap"):
+    with st.expander("Correlation Heatmap", expanded=False):
         if numeric_df.shape[1] < 2:
             st.info("Skipped correlation heatmap because at least two numeric columns are required.")
             return
 
-        correlation_matrix = numeric_df.corr().fillna(0.0)
+        sampled_numeric_df, sample_note = _sample_dataframe_for_visuals(
+            numeric_df,
+            max_rows=MAX_VISUALIZATION_ROWS,
+        )
+        limited_numeric_df = sampled_numeric_df.iloc[:, :MAX_HEATMAP_COLUMNS]
+        correlation_matrix = limited_numeric_df.corr().fillna(0.0)
         correlation_heatmap_data = (
             correlation_matrix.rename_axis(index="column_a", columns="column_b")
             .stack()
@@ -295,40 +358,288 @@ def _render_correlation_heatmap(dataframe: pd.DataFrame) -> None:
             st.info("Skipped correlation heatmap because no numeric correlation values were available.")
             return
 
-        st.vega_lite_chart(
-            correlation_heatmap_data,
-            {
-                "mark": "rect",
-                "encoding": {
-                    "x": {"field": "column_a", "type": "nominal", "title": ""},
-                    "y": {"field": "column_b", "type": "nominal", "title": ""},
-                    "color": {
-                        "field": "correlation",
-                        "type": "quantitative",
-                        "scale": {"domain": [-1, 1], "scheme": "redblue"},
-                        "title": "Correlation",
-                    },
-                    "tooltip": [
-                        {"field": "column_a", "type": "nominal", "title": "Column A"},
-                        {"field": "column_b", "type": "nominal", "title": "Column B"},
-                        {"field": "correlation", "type": "quantitative", "format": ".2f"},
-                    ],
-                },
-            },
+        base_chart = alt.Chart(correlation_heatmap_data).encode(
+            x=alt.X("column_a:N", title="", axis=alt.Axis(labelAngle=-35)),
+            y=alt.Y("column_b:N", title=""),
         )
+        heatmap = base_chart.mark_rect().encode(
+            color=alt.Color(
+                "correlation:Q",
+                scale=alt.Scale(domain=[-1, 1], scheme="teals"),
+                title="Correlation",
+            ),
+            tooltip=[
+                alt.Tooltip("column_a:N", title="Column A"),
+                alt.Tooltip("column_b:N", title="Column B"),
+                alt.Tooltip("correlation:Q", title="Correlation", format=".2f"),
+            ],
+        )
+        labels = base_chart.mark_text(baseline="middle", fontSize=11).encode(
+            text=alt.Text("correlation:Q", format=".2f"),
+            color=alt.condition(
+                "abs(datum.correlation) > 0.45",
+                alt.value("white"),
+                alt.value("#111827"),
+            ),
+        )
+        st.altair_chart((heatmap + labels).properties(height=460, title="Numeric Correlation Heatmap"), use_container_width=True)
+        if numeric_df.shape[1] > limited_numeric_df.shape[1]:
+            st.caption(
+                f"Showing the first {limited_numeric_df.shape[1]} numeric columns to keep the heatmap readable."
+            )
+        if sample_note:
+            st.caption(sample_note)
         st.caption("The heatmap shows how strongly numeric columns move together.")
+
+
+def _sample_dataframe_for_visuals(
+    dataframe: pd.DataFrame,
+    *,
+    max_rows: int = MAX_VISUALIZATION_ROWS,
+) -> tuple[pd.DataFrame, str | None]:
+    """Sample very large datasets so the dashboard stays responsive."""
+    if len(dataframe) <= max_rows:
+        return dataframe, None
+
+    sampled_df = dataframe.sample(n=max_rows, random_state=42)
+    return (
+        sampled_df,
+        f"Showing a random sample of {max_rows:,} rows for visualization performance.",
+    )
+
+
+def _render_visualization_metric_cards(dataframe: pd.DataFrame, profile: dict) -> None:
+    """Render a compact dataset quality summary above the charts."""
+    total_missing_values = int(sum(profile.get("missing_values", {}).values()))
+    metric_columns = st.columns(6)
+    metric_columns[0].metric("Total Rows", f"{len(dataframe):,}")
+    metric_columns[1].metric("Total Columns", f"{len(dataframe.columns):,}")
+    metric_columns[2].metric("Duplicate Rows", f"{int(profile.get('duplicate_rows', 0)):,}")
+    metric_columns[3].metric("Missing Values", f"{total_missing_values:,}")
+    metric_columns[4].metric("Numeric Columns", f"{len(profile.get('numeric_columns', [])):,}")
+    metric_columns[5].metric("Categorical Columns", f"{len(profile.get('categorical_columns', [])):,}")
+
+
+def _render_data_type_distribution(profile: dict) -> None:
+    """Show the distribution of major data types detected in the dataset."""
+    with st.expander("Data Type Distribution", expanded=False):
+        distribution_data = pd.DataFrame(
+            {
+                "data_type": [
+                    "Numeric",
+                    "Categorical",
+                    "Text",
+                    "Datetime",
+                ],
+                "count": [
+                    len(profile.get("numeric_columns", [])),
+                    len(profile.get("categorical_columns", [])),
+                    len(profile.get("text_columns", [])),
+                    len(profile.get("datetime_columns", [])),
+                ],
+            }
+        )
+        non_zero_distribution_data = distribution_data[distribution_data["count"] > 0]
+        if non_zero_distribution_data.empty:
+            st.info("Skipped data type distribution because no columns were available to classify.")
+            return
+
+        chart = (
+            alt.Chart(non_zero_distribution_data)
+            .mark_arc(innerRadius=55)
+            .encode(
+                theta=alt.Theta("count:Q", title="Column Count"),
+                color=alt.Color(
+                    "data_type:N",
+                    scale=alt.Scale(
+                        range=["#2563eb", "#16a34a", "#f59e0b", "#7c3aed"]
+                    ),
+                    title="Data Type",
+                ),
+                tooltip=[
+                    alt.Tooltip("data_type:N", title="Data Type"),
+                    alt.Tooltip("count:Q", title="Column Count"),
+                ],
+            )
+            .properties(height=320, title="Detected Data Type Distribution")
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+
+def _render_nlp_visualizations(
+    dataframe: pd.DataFrame,
+    text_columns: list[str],
+    target_column: str | None,
+) -> None:
+    """Render lightweight text visualizations only when free-text columns exist."""
+    with st.expander("NLP/Text Insights"):
+        if not text_columns:
+            st.info("Skipped NLP visualizations because no text columns were detected.")
+            return
+
+        text_column = text_columns[0]
+        text_series = dataframe[text_column].fillna("").astype(str).str.strip()
+        text_series = text_series[text_series != ""]
+        if text_series.empty:
+            st.info("Skipped NLP visualizations because the detected text column has no usable text values.")
+            return
+
+        sampled_text_series, sample_note = _sample_dataframe_for_visuals(
+            text_series.to_frame(name=text_column),
+            max_rows=MAX_VISUALIZATION_ROWS,
+        )
+        sampled_text_series = sampled_text_series[text_column]
+        length_data = pd.DataFrame(
+            {
+                "text_length": sampled_text_series.str.len(),
+            }
+        )
+        length_chart = (
+            alt.Chart(length_data)
+            .mark_bar(color="#6366f1")
+            .encode(
+                x=alt.X("text_length:Q", bin=alt.Bin(maxbins=25), title="Text Length (Characters)"),
+                y=alt.Y("count():Q", title="Record Count"),
+                tooltip=[alt.Tooltip("count():Q", title="Records")],
+            )
+            .properties(height=300, title=f"Length Distribution for '{text_column}'")
+        )
+        st.altair_chart(length_chart, use_container_width=True)
+
+        token_counter = Counter()
+        for value in sampled_text_series:
+            tokens = [token.lower() for token in value.split() if len(token) > 2]
+            token_counter.update(tokens)
+
+        if token_counter:
+            common_words_data = pd.DataFrame(
+                token_counter.most_common(MAX_WORDS_IN_CHART),
+                columns=["word", "count"],
+            )
+            common_words_chart = (
+                alt.Chart(common_words_data)
+                .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#8b5cf6")
+                .encode(
+                    x=alt.X("count:Q", title="Frequency"),
+                    y=alt.Y("word:N", sort="-x", title="Word"),
+                    tooltip=[
+                        alt.Tooltip("word:N", title="Word"),
+                        alt.Tooltip("count:Q", title="Frequency"),
+                    ],
+                )
+                .properties(height=320, title="Most Common Words in Sampled Text")
+            )
+            st.altair_chart(common_words_chart, use_container_width=True)
+        else:
+            st.info("Skipped common-word visualization because the sampled text did not contain enough tokens.")
+
+        if target_column is not None:
+            target_series = dataframe[target_column]
+            unique_count = int(target_series.dropna().nunique())
+            if 0 < unique_count <= 20:
+                target_counts = (
+                    target_series.fillna("Missing")
+                    .astype(str)
+                    .value_counts(dropna=False)
+                    .rename_axis("target_value")
+                    .reset_index(name="count")
+                )
+                target_chart = (
+                    alt.Chart(target_counts)
+                    .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color="#db2777")
+                    .encode(
+                        x=alt.X("target_value:N", title="Label", sort="-y"),
+                        y=alt.Y("count:Q", title="Record Count"),
+                    )
+                    .properties(height=280, title="Text Dataset Label Distribution")
+                )
+                st.altair_chart(target_chart, use_container_width=True)
+
+        if sample_note:
+            st.caption(sample_note)
+
+
+def _render_outlier_visualizations(dataframe: pd.DataFrame) -> None:
+    """Render outlier-focused plots without mutating the dataset."""
+    with st.expander("Outlier Overview"):
+        numeric_columns = dataframe.select_dtypes(include=["number"]).columns.tolist()
+        if not numeric_columns:
+            st.info("Skipped outlier visualization because this dataset has no numeric columns.")
+            return
+
+        selected_column = st.selectbox(
+            "Select numeric column for outlier review",
+            options=numeric_columns,
+            key="visualization_outlier_column",
+        )
+        sampled_df, sample_note = _sample_dataframe_for_visuals(
+            dataframe[[selected_column]].dropna(),
+            max_rows=MAX_VISUALIZATION_ROWS,
+        )
+        if sampled_df.empty:
+            st.info("Skipped outlier visualization because the selected column has no usable numeric values.")
+            return
+
+        series = sampled_df[selected_column]
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        outlier_count = int(((series < lower_bound) | (series > upper_bound)).sum()) if pd.notna(iqr) else 0
+
+        metric_columns = st.columns(3)
+        metric_columns[0].metric("IQR Lower Bound", f"{lower_bound:,.2f}")
+        metric_columns[1].metric("IQR Upper Bound", f"{upper_bound:,.2f}")
+        metric_columns[2].metric("Potential Outliers", f"{outlier_count:,}")
+
+        histogram_data = sampled_df.rename(columns={selected_column: "value"})
+        histogram_chart = (
+            alt.Chart(histogram_data)
+            .mark_bar(color="#0284c7")
+            .encode(
+                x=alt.X("value:Q", bin=alt.Bin(maxbins=30), title=selected_column),
+                y=alt.Y("count():Q", title="Record Count"),
+            )
+            .properties(height=280, title=f"Distribution of '{selected_column}'")
+        )
+        st.altair_chart(histogram_chart, use_container_width=True)
+
+        boxplot_chart = (
+            alt.Chart(histogram_data)
+            .mark_boxplot(extent=1.5, size=45, color="#0f766e")
+            .encode(
+                x=alt.X("value:Q", title=selected_column),
+            )
+            .properties(height=140, title=f"Outlier Review Boxplot for '{selected_column}'")
+        )
+        st.altair_chart(boxplot_chart, use_container_width=True)
+
+        if sample_note:
+            st.caption(sample_note)
 
 
 def render_dataset_visualizations(
     dataframe: pd.DataFrame,
+    profile: dict,
     target_column: str | None,
 ) -> None:
     """Render safe pre-cleaning dataset visualizations inside expanders."""
     st.subheader("Dataset Visualizations")
+    st.caption("Use these charts to inspect quality issues before applying any cleaning step.")
+    _render_visualization_metric_cards(dataframe, profile)
+    st.markdown("")
     _render_missing_values_chart(dataframe)
+    _render_data_type_distribution(profile)
     _render_target_distribution_chart(dataframe, target_column)
     _render_numeric_boxplot(dataframe)
     _render_correlation_heatmap(dataframe)
+    _render_outlier_visualizations(dataframe)
+    _render_nlp_visualizations(
+        dataframe,
+        profile.get("text_columns", []),
+        target_column,
+    )
 
 
 def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
@@ -625,6 +936,60 @@ def render_cleaning_results(
     st.write(f"Scaled numeric columns: {cleaning_summary.get('scaled_columns', [])}")
     st.write(f"Cleaned text columns: {cleaning_summary.get('cleaned_text_columns', [])}")
 
+    st.subheader("Cleaning Impact Summary")
+    comparison_columns = st.columns(4)
+    before_missing = int(sum(cleaning_summary["missing_values_before"].values()))
+    after_missing = int(sum(cleaning_summary["missing_values_after"].values()))
+    comparison_columns[0].metric(
+        "Missing Values",
+        f"{after_missing:,}",
+        delta=f"{after_missing - before_missing:,}",
+        delta_color="inverse",
+    )
+    comparison_columns[1].metric(
+        "Duplicate Rows",
+        f"{int(cleaned_df.duplicated().sum()):,}",
+        delta=f"{int(cleaned_df.duplicated().sum()) - int(cleaning_summary['duplicate_rows_removed'] + cleaned_df.duplicated().sum()):,}",
+        delta_color="inverse",
+    )
+    comparison_columns[2].metric(
+        "Row Count",
+        f"{cleaning_summary['final_rows']:,}",
+        delta=f"{cleaning_summary['final_rows'] - cleaning_summary['original_rows']:,}",
+    )
+    comparison_columns[3].metric(
+        "Column Count",
+        f"{cleaning_summary['final_columns']:,}",
+        delta=f"{cleaning_summary['final_columns'] - cleaning_summary['original_columns']:,}",
+    )
+
+    impact_table = pd.DataFrame(
+        [
+            {
+                "Metric": "Missing Values",
+                "Before Cleaning": before_missing,
+                "After Cleaning": after_missing,
+            },
+            {
+                "Metric": "Duplicate Rows",
+                "Before Cleaning": cleaning_summary["duplicate_rows_removed"]
+                + int(cleaned_df.duplicated().sum()),
+                "After Cleaning": int(cleaned_df.duplicated().sum()),
+            },
+            {
+                "Metric": "Column Count",
+                "Before Cleaning": cleaning_summary["original_columns"],
+                "After Cleaning": cleaning_summary["final_columns"],
+            },
+            {
+                "Metric": "Row Count",
+                "Before Cleaning": cleaning_summary["original_rows"],
+                "After Cleaning": cleaning_summary["final_rows"],
+            },
+        ]
+    )
+    st.dataframe(impact_table, width="stretch")
+
     if cleaning_summary.get("target_encoding_recommendation"):
         st.info(cleaning_summary["target_encoding_recommendation"])
 
@@ -826,7 +1191,7 @@ def render_uploaded_dataset(
     )
 
     render_dataset_profile(profile)
-    render_dataset_visualizations(dataframe, selected_target)
+    render_dataset_visualizations(dataframe, profile, selected_target)
     render_data_quality_report(profile, ml_recommendation)
     render_cleaning_options_summary(cleaning_options)
     render_flowise_explanation_section(
