@@ -33,6 +33,14 @@ class TestMlRecommenderIntelligence(unittest.TestCase):
         self.assertEqual(recommendation["suggested_target_column"], "Survived")
         self.assertEqual(recommendation["recommended_problem_type"], "Binary Classification")
         self.assertEqual(recommendation["target_detection_confidence"], "High")
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Logistic Regression",
+        )
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["target_variable_type"],
+            "Binary categorical target",
+        )
 
     def test_house_prices_detects_regression(self):
         dataframe = pd.DataFrame(
@@ -52,6 +60,14 @@ class TestMlRecommenderIntelligence(unittest.TestCase):
         )
 
         self.assertEqual(recommendation["recommended_problem_type"], "Regression")
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Linear Regression",
+        )
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["target_variable_type"],
+            "Continuous numeric target",
+        )
 
     def test_spam_sms_detects_nlp_text_classification(self):
         dataframe = pd.DataFrame(
@@ -74,6 +90,14 @@ class TestMlRecommenderIntelligence(unittest.TestCase):
         )
 
         self.assertEqual(recommendation["recommended_problem_type"], "NLP/Text Classification")
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Naive Bayes",
+        )
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["target_variable_type"],
+            "Binary text label target",
+        )
 
     def test_customer_segmentation_without_target_stays_clustering(self):
         dataframe = pd.DataFrame(
@@ -95,6 +119,14 @@ class TestMlRecommenderIntelligence(unittest.TestCase):
 
         self.assertIsNone(recommendation["suggested_target_column"])
         self.assertEqual(recommendation["recommended_problem_type"], "Clustering")
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "K-Means",
+        )
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["target_variable_type"],
+            "No target variable provided (unsupervised learning)",
+        )
 
     def test_dataset_with_only_ids_returns_unknown(self):
         dataframe = pd.DataFrame(
@@ -115,6 +147,10 @@ class TestMlRecommenderIntelligence(unittest.TestCase):
         self.assertEqual(
             recommendation["recommended_problem_type"],
             "Unknown / Needs More Information",
+        )
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Ask user for more information",
         )
 
 

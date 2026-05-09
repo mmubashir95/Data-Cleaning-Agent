@@ -78,8 +78,13 @@ class TestCleaningReportActions(unittest.TestCase):
 
         self.assertIn("skipped_steps", report)
         self.assertIn("before_vs_after_summary", report)
+        self.assertIn("algorithm_recommendation", report)
         self.assertEqual(report["recommended_ml_problem_type"], "Classification")
         self.assertEqual(report["scaler_used"], "StandardScaler")
+        self.assertEqual(
+            report["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Logistic Regression",
+        )
         self.assertEqual(len(cleaned_df), len(dataframe))
 
 

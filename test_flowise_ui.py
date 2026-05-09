@@ -102,6 +102,16 @@ class TestFlowisePromptUI(unittest.TestCase):
         self.assertIn("PassengerId", sent_preview)
         self.assertNotIn("Explain why Random Forest is suitable for Titanic dataset", sent_preview)
 
+    def test_flowise_preview_includes_algorithm_recommendation_details(self):
+        at = _upload_app()
+
+        text_values = [element.value for element in at.text]
+        combined_text = " ".join(text_values)
+
+        self.assertIn("Recommended Algorithms: Logistic Regression, Decision Tree, Random Forest", combined_text)
+        self.assertIn("Beginner-Friendly First Choice: Logistic Regression", combined_text)
+        self.assertIn("Target Variable Type: Binary categorical target", combined_text)
+
 
 if __name__ == "__main__":
     unittest.main()

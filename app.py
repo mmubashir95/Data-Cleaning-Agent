@@ -204,12 +204,30 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     st.write(f"Target Column Used For Inference: {ml_recommendation['target_column_used_for_inference']}")
     st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
 
+    algorithm_recommendation = ml_recommendation.get("algorithm_recommendation", {})
+    beginner_choice = algorithm_recommendation.get("beginner_friendly_first_choice")
+    if algorithm_recommendation.get("summary"):
+        st.info(algorithm_recommendation["summary"])
+    if algorithm_recommendation.get("target_variable_type"):
+        st.write(
+            f"Target Variable Type: {algorithm_recommendation['target_variable_type']}"
+        )
+    if beginner_choice:
+        st.success(
+            "Beginner-friendly first choice: "
+            f"{beginner_choice['name']}"
+        )
+        st.write(f"Why it is suitable: {beginner_choice['reason']}")
+
     for warning_message in ml_recommendation["warnings"]:
         st.warning(warning_message)
 
     st.write("Recommended algorithms:")
-    for algorithm in ml_recommendation["algorithms"]:
-        st.write(f"- {algorithm['name']}: {algorithm['reason']}")
+    for algorithm in algorithm_recommendation.get(
+        "recommended_algorithms",
+        ml_recommendation["algorithms"],
+    ):
+        st.markdown(f"- **{algorithm['name']}**: {algorithm['reason']}")
 
     with st.expander("View detailed ML recommendation metadata"):
         st.write(f"Numeric Columns: {ml_recommendation['numeric_columns']}")

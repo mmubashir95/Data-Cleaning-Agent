@@ -235,6 +235,10 @@ class TestFullDatasetWorkflows(unittest.TestCase):
         self.assertEqual(report["target_column"], "label")
         self.assertEqual(report["ml_recommendation"]["problem_type"], "NLP/Text Classification")
         self.assertEqual(report["ml_recommendation"]["detected_text_column"], "message")
+        self.assertEqual(
+            report["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Naive Bayes",
+        )
         self.assertIn("output_files", report)
         self.assertTrue(Path(report_path).exists())
         self.assertTrue(cleaned_df["label"].equals(df["label"]))

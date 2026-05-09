@@ -80,6 +80,9 @@ def build_flowise_dataset_summary(
         "recommended_problem_type": _to_json_safe(
             ml_recommendation.get("recommended_problem_type")
         ),
+        "algorithm_recommendation": _to_json_safe(
+            ml_recommendation.get("algorithm_recommendation", {})
+        ),
         "recommended_algorithms": _to_json_safe(
             [
                 algorithm.get("name", str(algorithm))
@@ -102,6 +105,9 @@ def build_flowise_dataset_summary(
                 "columns_scaled": cleaning_report.get("columns_scaled", []),
                 "recommended_ml_problem_type": cleaning_report.get(
                     "recommended_ml_problem_type"
+                ),
+                "algorithm_recommendation": cleaning_report.get(
+                    "algorithm_recommendation", {}
                 ),
                 "cleaning_steps": cleaning_report.get("cleaning_steps", []),
                 "skipped_steps": cleaning_report.get("skipped_steps", []),
@@ -183,6 +189,22 @@ def build_flowise_file_preview(
                 for algorithm in ml_recommendation.get("algorithms", [])
             )
         )
+        algorithm_recommendation = ml_recommendation.get("algorithm_recommendation", {})
+        first_choice = algorithm_recommendation.get("beginner_friendly_first_choice", {})
+        if first_choice:
+            preview_sections.append(
+                "Beginner-Friendly First Choice: "
+                f"{first_choice.get('name', 'Unknown')}"
+            )
+            preview_sections.append(
+                "Why It Fits: "
+                f"{first_choice.get('reason', 'No reason provided.')}"
+            )
+        if algorithm_recommendation.get("target_variable_type"):
+            preview_sections.append(
+                "Target Variable Type: "
+                f"{algorithm_recommendation['target_variable_type']}"
+            )
 
     preview_sections.extend(
         [
@@ -205,6 +227,9 @@ def build_flowise_file_preview(
                             ),
                             "columns_encoded": cleaning_report.get("columns_encoded", []),
                             "columns_scaled": cleaning_report.get("columns_scaled", []),
+                            "algorithm_recommendation": cleaning_report.get(
+                                "algorithm_recommendation", {}
+                            ),
                             "cleaning_steps": cleaning_report.get("cleaning_steps", []),
                             "skipped_steps": cleaning_report.get("skipped_steps", []),
                         }

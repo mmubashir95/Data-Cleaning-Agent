@@ -209,6 +209,74 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
 
 
+def _describe_target_variable_type(
+    df: pd.DataFrame,
+    target_column: str | None,
+    recommended_problem_type: str,
+) -> str:
+    """Describe the target in beginner-friendly terms for UI/report output."""
+    if target_column is None:
+        if recommended_problem_type == "Clustering":
+            return "No target variable provided (unsupervised learning)"
+        return "Unknown target variable type"
+
+    series = df[target_column]
+    non_null = series.dropna()
+    unique_count = int(non_null.nunique(dropna=True)) if not non_null.empty else 0
+
+    if recommended_problem_type == "Regression":
+        return "Continuous numeric target"
+    if recommended_problem_type == "NLP/Text Classification":
+        if unique_count == 2:
+            return "Binary text label target"
+        return "Categorical text label target"
+    if recommended_problem_type in {"Binary Classification", "Classification"}:
+        return "Binary categorical target"
+    if recommended_problem_type == "Multi-class Classification":
+        return "Multi-class categorical target"
+    if is_numeric_dtype(series):
+        return "Numeric target"
+    return "Categorical target"
+
+
+def _build_algorithm_recommendation(
+    df: pd.DataFrame,
+    recommended_problem_type: str,
+    algorithms: list[dict[str, str]],
+    target_column: str | None,
+) -> dict[str, Any]:
+    """Create a richer algorithm recommendation payload for UI and JSON output."""
+    target_variable_type = _describe_target_variable_type(
+        df,
+        target_column,
+        recommended_problem_type,
+    )
+    first_choice = algorithms[0] if algorithms else None
+
+    if recommended_problem_type == "Unknown / Needs More Information":
+        summary = (
+            "The app cannot recommend a reliable model yet. Please provide a target column "
+            "or explain the prediction objective."
+        )
+    elif recommended_problem_type == "Clustering":
+        summary = (
+            "No target variable is available, so the app recommends unsupervised clustering "
+            "models that group similar records."
+        )
+    else:
+        summary = (
+            f"The app recommends {recommended_problem_type.lower()} algorithms because the "
+            f"target behaves like a {target_variable_type.lower()}."
+        )
+
+    return {
+        "target_variable_type": target_variable_type,
+        "beginner_friendly_first_choice": first_choice,
+        "recommended_algorithms": algorithms,
+        "summary": summary,
+    }
+
+
 def _looks_like_main_nlp_text_feature(df: pd.DataFrame, text_columns: list[str]) -> str | None:
     """Return the strongest NLP-style text feature, or None if text is metadata-like."""
     for column in text_columns:
@@ -490,6 +558,12 @@ def recommend_ml_approach(
         recommended_problem_type = "Unknown / Needs More Information"
         reason = "The dataset is empty or has no columns, so a reliable ML problem type cannot be inferred."
         algorithms = ALGORITHM_MAP[recommended_problem_type]
+        algorithm_recommendation = _build_algorithm_recommendation(
+            df,
+            recommended_problem_type,
+            algorithms,
+            None,
+        )
         return {
             "recommended_problem_type": recommended_problem_type,
             "suggested_problem_type": recommended_problem_type,
@@ -510,6 +584,7 @@ def recommend_ml_approach(
             "datetime_columns": column_types["datetime_columns"],
             "id_like_columns": column_types["id_like_columns"],
             "algorithms": algorithms,
+            "algorithm_recommendation": algorithm_recommendation,
         }
 
     if target_column is not None:
@@ -548,6 +623,12 @@ def recommend_ml_approach(
         recommended_problem_type,
         ALGORITHM_MAP["Unknown / Needs More Information"],
     )
+    algorithm_recommendation = _build_algorithm_recommendation(
+        df,
+        recommended_problem_type,
+        algorithms,
+        target_used,
+    )
 
     return {
         "recommended_problem_type": recommended_problem_type,
@@ -572,4 +653,5 @@ def recommend_ml_approach(
         "datetime_columns": column_types["datetime_columns"],
         "id_like_columns": column_types["id_like_columns"],
         "algorithms": algorithms,
+        "algorithm_recommendation": algorithm_recommendation,
     }
