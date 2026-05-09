@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from typing import Any
 
 import pandas as pd
@@ -206,12 +207,15 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
 def profile_dataset(df: pd.DataFrame, target_column: str | None = None) -> dict[str, Any]:
     """Create a profile summary that includes shape, quality, and column classes."""
     classification = classify_columns(df, target_column=target_column)
+    info_buffer = io.StringIO()
+    df.info(buf=info_buffer)
 
     profile: dict[str, Any] = {
         "rows": len(df),
         "columns": len(df.columns),
         "column_names": list(df.columns),
         "data_types": df.dtypes.astype(str).to_dict(),
+        "dataframe_info": info_buffer.getvalue(),
         "missing_values": df.isna().sum().to_dict(),
         "duplicate_rows": int(df.duplicated().sum()),
     }

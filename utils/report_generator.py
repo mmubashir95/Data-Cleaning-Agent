@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from utils.library_usage import build_pandas_numpy_usage
+
 
 def _make_json_serializable(value: Any) -> Any:
     """Recursively convert values into JSON-safe Python types."""
@@ -50,6 +52,11 @@ def generate_cleaning_report(
     encoded_columns = cleaning_summary.get("encoded_columns", [])
     scaled_columns = cleaning_summary.get("scaled_columns", [])
     cleaned_text_columns = cleaning_summary.get("cleaned_text_columns", [])
+    pandas_numpy_usage = build_pandas_numpy_usage(
+        original_file_name=original_file_name,
+        profile=profile,
+        cleaning_summary=cleaning_summary,
+    )
 
     cleaning_actions = {
         "duplicates_removed": {
@@ -152,6 +159,7 @@ def generate_cleaning_report(
         "recommended_ml_problem_type": ml_recommendation.get("recommended_problem_type"),
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
         "algorithm_recommendation": ml_recommendation.get("algorithm_recommendation", {}),
+        "pandas_numpy_usage": pandas_numpy_usage,
         "before_vs_after_summary": cleaning_summary.get("before_vs_after_summary", {}),
         "cleaning_steps": cleaning_summary.get("cleaning_steps", []),
         "skipped_steps": cleaning_summary.get("skipped_steps", []),

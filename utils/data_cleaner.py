@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
@@ -81,6 +82,7 @@ def clean_dataset(
     target_encoding_recommendation: str | None = None
     scaled_columns: list[str] = []
     scaler_used: str | None = None
+    scaling_reference_stats: dict[str, dict[str, float]] = {}
     cleaned_text_columns: list[str] = []
     nlp_cleaning_actions: list[str] = []
     nlp_original_backup_columns: list[str] = []
@@ -172,7 +174,7 @@ def clean_dataset(
                 continue
 
             if pd.api.types.is_numeric_dtype(cleaned_df[column]):
-                median_value = cleaned_df[column].median()
+                median_value = np.median(cleaned_df[column].dropna())
 
                 if pd.isna(median_value):
                     cleaned_df[column] = cleaned_df[column].fillna(0)
@@ -238,8 +240,10 @@ def clean_dataset(
 
             lower_bound = q1 - 1.5 * iqr
             upper_bound = q3 + 1.5 * iqr
-            outlier_mask = (cleaned_df[column] < lower_bound) | (cleaned_df[column] > upper_bound)
-            outlier_count = int(outlier_mask.sum())
+            outlier_positions = np.where(
+                (cleaned_df[column] < lower_bound) | (cleaned_df[column] > upper_bound)
+            )[0]
+            outlier_count = int(len(outlier_positions))
 
             if outlier_count == 0:
                 continue
@@ -371,6 +375,13 @@ def clean_dataset(
                 else:
                     scaler = StandardScaler()
                     scaler_used = "StandardScaler"
+                    scaling_reference_stats = {
+                        column: {
+                            "mean_before_scaling": float(np.mean(cleaned_df[column])),
+                            "std_before_scaling": float(np.std(cleaned_df[column])),
+                        }
+                        for column in feature_numeric_columns
+                    }
                     cleaning_steps.append(
                         "StandardScaler standardizes values around mean 0 and standard deviation 1."
                     )
@@ -461,6 +472,7 @@ def clean_dataset(
         "nlp_before_after_examples": nlp_before_after_examples,
         "scaled_columns": scaled_columns,
         "scaler_used": scaler_used,
+        "scaling_reference_stats": scaling_reference_stats,
         "before_vs_after_summary": before_vs_after_summary,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,

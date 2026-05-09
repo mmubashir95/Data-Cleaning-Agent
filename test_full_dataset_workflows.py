@@ -264,6 +264,7 @@ class TestFullDatasetWorkflows(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertTrue(cleaned_output.exists())
         self.assertTrue(report_output.exists())
+        self.assertIn("Pandas and NumPy Usage", [element.value for element in app.subheader])
 
 
 if __name__ == "__main__":

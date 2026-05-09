@@ -239,6 +239,22 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.write("Top target suggestions:", ml_recommendation["target_detection_metadata"].get("top_suggestions", []))
 
 
+def render_pandas_numpy_usage_section(pandas_numpy_usage: dict) -> None:
+    """Show a beginner-friendly explanation of relevant Pandas and NumPy usage."""
+    st.subheader("Pandas and NumPy Usage")
+    st.info(pandas_numpy_usage.get("summary", "No Pandas or NumPy usage details were recorded."))
+
+    st.write("Pandas functions used:")
+    for entry in pandas_numpy_usage.get("pandas_functions", []):
+        st.markdown(f"- **{entry['function']}**: {entry['why_used']}")
+
+    numpy_functions = pandas_numpy_usage.get("numpy_functions", [])
+    if numpy_functions:
+        st.write("NumPy functions used or directly relevant:")
+        for entry in numpy_functions:
+            st.markdown(f"- **{entry['function']}**: {entry['why_used']}")
+
+
 def build_flowise_prompt(
     selected_prompt_type: str,
     dataset_summary: str,
@@ -497,6 +513,10 @@ def render_cleaning_results(
             for column_name, example in cleaning_summary["nlp_before_after_examples"].items():
                 st.write(f"{column_name} before: {example['before']}")
                 st.write(f"{column_name} after: {example['after']}")
+
+    render_pandas_numpy_usage_section(
+        cleaning_report.get("pandas_numpy_usage", {})
+    )
 
     st.subheader("8. Download Output Files")
     st.download_button(

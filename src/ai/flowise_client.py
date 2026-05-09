@@ -8,6 +8,8 @@ from typing import Any
 import pandas as pd
 import requests
 
+from utils.library_usage import build_pandas_numpy_usage
+
 FLOWISE_PREDICTION_URL = (
     "https://cloud.flowiseai.com/api/v1/prediction/"
     "6a7b5277-b4bf-4a79-a785-8cde06dbf860"
@@ -61,6 +63,17 @@ def build_flowise_dataset_summary(
     avoid Flowise/OpenAI token overflow by sending only the most relevant,
     high-signal dataset summary and at most the first 5 rows.
     """
+    profile = profile or {}
+    ml_recommendation = ml_recommendation or {}
+    pandas_numpy_usage = (
+        cleaning_report.get("pandas_numpy_usage", {})
+        if cleaning_report is not None
+        else build_pandas_numpy_usage(
+            original_file_name="dataset.csv",
+            profile=profile,
+            cleaning_summary={},
+        )
+    )
     summary = {
         "dataset_shape": {
             "rows": int(len(dataframe)),
@@ -83,6 +96,7 @@ def build_flowise_dataset_summary(
         "algorithm_recommendation": _to_json_safe(
             ml_recommendation.get("algorithm_recommendation", {})
         ),
+        "pandas_numpy_usage": _to_json_safe(pandas_numpy_usage),
         "recommended_algorithms": _to_json_safe(
             [
                 algorithm.get("name", str(algorithm))
@@ -140,6 +154,15 @@ def build_flowise_file_preview(
 
     profile = profile or {}
     ml_recommendation = ml_recommendation or {}
+    pandas_numpy_usage = (
+        cleaning_report.get("pandas_numpy_usage", {})
+        if cleaning_report is not None
+        else build_pandas_numpy_usage(
+            original_file_name=file_name or "dataset.csv",
+            profile=profile,
+            cleaning_summary={},
+        )
+    )
     preview_rows = max(1, min(max_rows, 10))
 
     # Flowise appears to respond better to raw-looking tabular text than to
@@ -205,6 +228,28 @@ def build_flowise_file_preview(
                 "Target Variable Type: "
                 f"{algorithm_recommendation['target_variable_type']}"
             )
+        preview_sections.append(
+            "Pandas and NumPy Usage: "
+            f"{pandas_numpy_usage.get('summary', 'No usage summary available.')}"
+        )
+        pandas_function_names = [
+            entry.get("function", "")
+            for entry in pandas_numpy_usage.get("pandas_functions", [])
+            if entry.get("function")
+        ]
+        if pandas_function_names:
+            preview_sections.append(
+                "Relevant Pandas Functions: " + ", ".join(pandas_function_names)
+            )
+        numpy_function_names = [
+            entry.get("function", "")
+            for entry in pandas_numpy_usage.get("numpy_functions", [])
+            if entry.get("function")
+        ]
+        if numpy_function_names:
+            preview_sections.append(
+                "Relevant NumPy Functions: " + ", ".join(numpy_function_names)
+            )
 
     preview_sections.extend(
         [
@@ -229,6 +274,9 @@ def build_flowise_file_preview(
                             "columns_scaled": cleaning_report.get("columns_scaled", []),
                             "algorithm_recommendation": cleaning_report.get(
                                 "algorithm_recommendation", {}
+                            ),
+                            "pandas_numpy_usage": cleaning_report.get(
+                                "pandas_numpy_usage", {}
                             ),
                             "cleaning_steps": cleaning_report.get("cleaning_steps", []),
                             "skipped_steps": cleaning_report.get("skipped_steps", []),

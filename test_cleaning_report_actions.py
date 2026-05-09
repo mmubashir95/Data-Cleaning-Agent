@@ -85,7 +85,69 @@ class TestCleaningReportActions(unittest.TestCase):
             report["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
             "Logistic Regression",
         )
+        self.assertIn("pandas_numpy_usage", report)
+        numpy_functions = {
+            entry["function"] for entry in report["pandas_numpy_usage"]["numpy_functions"]
+        }
+        self.assertIn("np.mean()", numpy_functions)
+        self.assertIn("np.std()", numpy_functions)
         self.assertEqual(len(cleaned_df), len(dataframe))
+
+    def test_report_includes_only_relevant_pandas_numpy_usage_for_performed_actions(self):
+        dataframe = pd.DataFrame(
+            {
+                "category": ["a", "a", "b", "b", "c", "c"],
+                "numeric_value": [1.0, None, 2.0, 3.0, 4.0, 1000.0],
+                "target": [0, 0, 1, 1, 1, 1],
+            }
+        )
+        dataframe = pd.concat([dataframe, dataframe.iloc[[4]]], ignore_index=True)
+
+        cleaning_options = {
+            "remove_duplicates": True,
+            "handle_missing_values": True,
+            "fix_data_types": False,
+            "handle_outliers": True,
+            "encode_categorical": True,
+            "scale_numeric": False,
+            "scaler_choice": None,
+            "nlp_cleaning": False,
+        }
+
+        _, cleaning_summary = clean_dataset(
+            dataframe,
+            cleaning_options,
+            target_column="target",
+        )
+        profile = profile_dataset(dataframe, target_column="target")
+        recommendation = recommend_ml_approach(
+            dataframe,
+            target_column="target",
+            problem_type="Auto-detect",
+            text_columns=profile["text_columns"],
+        )
+        report, _ = generate_cleaning_report(
+            profile,
+            {"errors": [], "warnings": [], "is_valid": True},
+            cleaning_summary,
+            recommendation,
+            "sample.csv",
+        )
+
+        pandas_functions = {
+            entry["function"] for entry in report["pandas_numpy_usage"]["pandas_functions"]
+        }
+        numpy_functions = {
+            entry["function"] for entry in report["pandas_numpy_usage"]["numpy_functions"]
+        }
+
+        self.assertIn("fillna()", pandas_functions)
+        self.assertIn("median()/mode()", pandas_functions)
+        self.assertIn("duplicated().sum()", pandas_functions)
+        self.assertIn("drop_duplicates()", pandas_functions)
+        self.assertIn("get_dummies()", pandas_functions)
+        self.assertIn("quantile()", pandas_functions)
+        self.assertIn("np.median()", numpy_functions)
 
 
 if __name__ == "__main__":

@@ -111,6 +111,8 @@ class TestFlowisePromptUI(unittest.TestCase):
         self.assertIn("Recommended Algorithms: Logistic Regression, Decision Tree, Random Forest", combined_text)
         self.assertIn("Beginner-Friendly First Choice: Logistic Regression", combined_text)
         self.assertIn("Target Variable Type: Binary categorical target", combined_text)
+        self.assertIn("Pandas and NumPy Usage:", combined_text)
+        self.assertIn("Relevant Pandas Functions: read_csv(), head(), info(), isnull().sum(), duplicated().sum()", combined_text)
 
 
 if __name__ == "__main__":
