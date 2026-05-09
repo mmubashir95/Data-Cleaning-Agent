@@ -13,7 +13,11 @@ from src.ai.flowise_client import build_default_flowise_metadata
 
 
 def _make_json_serializable(value: Any) -> Any:
-    """Recursively convert values into JSON-safe Python types."""
+    """Recursively convert values into JSON-safe Python types.
+
+    Reports aggregate pandas, NumPy, pathlib, and UI-derived values, so this
+    conversion step prevents serialization failures late in the workflow.
+    """
     if isinstance(value, dict):
         return {str(key): _make_json_serializable(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -45,7 +49,12 @@ def generate_cleaning_report(
     cleaned_file_path: str | Path | None = None,
     flowise_metadata: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Build and save a single JSON cleaning report for the current workflow."""
+    """Build and save a single JSON cleaning report for the current workflow.
+
+    The report is intentionally structured for both machine-readable reuse and
+    beginner-friendly explanation. It also records Flowise metadata so the
+    project can show exactly what the AI layer did or did not receive.
+    """
     report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
     report_path = Path("reports") / report_name
     options_used = cleaning_summary.get("options_used", {})
@@ -62,6 +71,8 @@ def generate_cleaning_report(
     )
     flowise_metadata = flowise_metadata or build_default_flowise_metadata()
 
+    # Keep the action blocks explicit so the report can distinguish between a
+    # step being selected, actually performed, or skipped for safety reasons.
     cleaning_actions = {
         "duplicates_removed": {
             "selected": options_used.get("remove_duplicates", False),
@@ -114,6 +125,8 @@ def generate_cleaning_report(
         cleaning_actions=cleaning_actions,
     )
 
+    # The report stores Python-computed facts only. AI output is kept separate
+    # so exact dataset statistics are never replaced by generated text.
     report_data = {
         "original_file_name": original_file_name,
         "original_rows": profile.get("rows"),
@@ -256,7 +269,11 @@ def format_cleaning_summary(
 
 
 def generate_report(report_content: dict[str, Any] | str, output_path: str | Path) -> Path:
-    """Write a report to disk, storing dictionaries as JSON."""
+    """Write a report to disk, storing dictionaries as JSON.
+
+    Disk output happens at the end so the app can show the same canonical
+    report in the UI, downloads, and saved artifact.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 

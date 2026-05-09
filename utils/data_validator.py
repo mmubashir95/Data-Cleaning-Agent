@@ -54,7 +54,8 @@ def validate_dataset(
     if target_column is not None and target_column not in df.columns:
         errors.append(f"Selected target column '{target_column}' was not found in the dataset.")
 
-    # Warnings below do not block profiling or future cleaning steps.
+    # Warnings below do not block profiling or future cleaning steps because
+    # they describe risky data characteristics, not hard structural failures.
     if len(df.index) == 1:
         warnings.append("The dataset contains only one row, which may be too small for analysis.")
 
@@ -78,6 +79,8 @@ def validate_dataset(
         for column in object_columns:
             unique_ratio = df[column].nunique(dropna=True) / row_count
             if df[column].nunique(dropna=True) >= 50 or unique_ratio >= 0.8:
+                # High-cardinality text/categorical fields often need special
+                # feature engineering and can be expensive to encode blindly.
                 warnings.append(
                     f"Column '{column}' has very high cardinality and may need special handling."
                 )

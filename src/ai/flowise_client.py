@@ -1,4 +1,10 @@
-"""Flowise API client used only for AI explanations, not data cleaning."""
+"""Flowise integration used only for AI explanations, never for core processing.
+
+Python remains the source of truth for validation, profiling, statistics,
+cleaning, and report generation. The Flowise call receives only a compact
+preview/profile so the app avoids token overflow, reduces privacy exposure,
+and prevents the LLM from being treated as the executor of data operations.
+"""
 
 from __future__ import annotations
 
@@ -98,9 +104,16 @@ def _truncate_sample_rows(
     max_columns: int = 25,
     max_text_length: int = 120,
 ) -> tuple[list[dict[str, Any]], list[str], int]:
-    """Build a token-safe sample row preview."""
+    """Build a token-safe sample row preview.
+
+    Only a small preview is sent to Flowise because large raw datasets are both
+    expensive and unreliable in an LLM context. This keeps prompts bounded and
+    ensures Python, not the model, performs any exact dataset computation.
+    """
     preview_rows = max(1, min(max_rows, 10))
     preview_columns = list(dataframe.columns[:max_columns])
+    # Cap both rows and columns so prompt size stays predictable even for wide
+    # datasets that would otherwise exceed LLM context limits.
     preview_frame = dataframe.loc[:, preview_columns].head(preview_rows).copy()
     preview_frame = preview_frame.where(pd.notna(preview_frame), None)
 
@@ -126,7 +139,13 @@ def build_flowise_profile_object(
     file_name: str | None = None,
     max_rows: int = 10,
 ) -> dict[str, Any]:
-    """Build the compact structured profile object sent to Flowise."""
+    """Build the compact structured profile object sent to Flowise.
+
+    The object intentionally contains Python-computed summaries instead of the
+    full dataset. That lets the AI explain verified facts while avoiding
+    hallucinated exact counts, wide-table prompt explosions, and unnecessary
+    transmission of raw records.
+    """
     profile = profile or {}
     ml_recommendation = ml_recommendation or {}
     cleaning_report = cleaning_report or {}
@@ -151,6 +170,9 @@ def build_flowise_profile_object(
     cleaning_actions = cleaning_report.get("cleaning_actions", {})
     for action_name, details in cleaning_actions.items():
         if details.get("performed"):
+            # Send only compact action summaries. The report on disk keeps the
+            # full detail, while the LLM only needs enough context to explain
+            # what happened.
             cleaning_actions_performed.append(
                 {
                     "action": action_name,
@@ -263,7 +285,12 @@ def build_flowise_file_preview(
     file_name: str | None = None,
     max_rows: int = 10,
 ) -> str:
-    """Build a compact profile preview for Flowise without sending raw CSV data."""
+    """Build a compact profile preview for Flowise without sending raw CSV data.
+
+    This is the main safety boundary for the AI layer: Python summarizes first,
+    and Flowise sees only the summary. Full datasets are deliberately excluded
+    to avoid token overflow and to keep exact statistics grounded in code.
+    """
     if df is None:
         raise ValueError("No dataset is available to summarize for the AI agent.")
     if df.empty:
@@ -301,7 +328,12 @@ def build_flowise_request_payload(
     question: str,
     profile_text: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build the exact payload sent to Flowise and derived metadata."""
+    """Build the exact payload sent to Flowise and derived metadata.
+
+    Metadata is captured alongside the payload so reports can show whether the
+    AI explanation used a validated preview, how many preview rows were sent,
+    and whether the request stayed within the no-full-dataset contract.
+    """
     is_valid_profile, profile_data = validate_flowise_profile_text(profile_text)
     combined_question = build_flowise_combined_question(question, profile_text if is_valid_profile else None)
     preview_rows_sent = len(profile_data.get("sample_rows", [])) if profile_data else 0
@@ -329,12 +361,14 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
     Flowise is used only as an optional AI explanation layer.
     """
     payload, request_metadata = build_flowise_request_payload(question, file_summary)
-    preview_rows_sent = request_metadata["preview_rows_sent"]
 
     try:
         response = requests.post(FLOWISE_PREDICTION_URL, json=payload, timeout=60)
     except requests.Timeout:
         logger.warning("Flowise request timed out.")
+        # Fallback/manual mode: when Flowise is unavailable, the app still has
+        # the Python-generated profile, cleaning summary, and downloadable
+        # report, so explanation failure does not block the main workflow.
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
@@ -412,6 +446,8 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
 
     return {
         "success": True,
+        # Answers are post-processed so the UI always reminds users that the
+        # response is based on a compact Python summary, not the raw file.
         "answer": extract_flowise_answer(response_json),
         "raw_response": response_json,
         "metadata": {

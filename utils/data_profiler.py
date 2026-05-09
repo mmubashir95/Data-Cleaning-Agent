@@ -44,7 +44,11 @@ def _is_boolean_like(series: pd.Series) -> bool:
 
 
 def _looks_datetime(series: pd.Series, column_name: str) -> bool:
-    """Check whether a column should be treated as datetime-like."""
+    """Check whether a column should be treated as datetime-like.
+
+    Detection combines naming hints with parsing success so the profiler avoids
+    over-classifying arbitrary text as dates.
+    """
     if is_datetime64_any_dtype(series):
         return True
 
@@ -74,7 +78,11 @@ def _looks_datetime(series: pd.Series, column_name: str) -> bool:
 
 
 def _looks_numeric_like(series: pd.Series) -> bool:
-    """Check whether an object column is mostly numeric despite dirty values."""
+    """Check whether an object column is mostly numeric despite dirty values.
+
+    This allows profiling and cleaning to recognize numeric intent in common
+    exported datasets where numbers arrive as strings.
+    """
     if not (is_object_dtype(series) or is_string_dtype(series)):
         return False
 
@@ -122,6 +130,9 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
     Thresholds are intentionally kept near the top of the function so they can
     be adjusted later as more datasets are tested.
     """
+    # These heuristics are intentionally simple and explainable. The goal is to
+    # support a broad classroom/project dataset mix without hiding decisions
+    # behind opaque scoring models.
     text_unique_ratio_threshold = 0.5
     text_average_length_threshold = 25
     text_max_length_threshold = 60
@@ -179,7 +190,8 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
             if _is_id_like(series, column, row_count):
                 classification["id_like_columns"].append(column)
 
-            # Treat repeated low-cardinality values as categorical features.
+            # Treat repeated low-cardinality values as categorical features so
+            # downstream cleaning and algorithm selection remain beginner-safe.
             if (
                 unique_count <= categorical_unique_count_threshold
                 or (
@@ -190,7 +202,8 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
                 classification["categorical_columns"].append(column)
                 continue
 
-            # Long or highly unique free-form values should be preserved as text.
+            # Long or highly unique free-form values should be preserved as text
+            # because collapsing them into categories usually destroys meaning.
             if (
                 unique_ratio >= text_unique_ratio_threshold
                 or average_length >= text_average_length_threshold
@@ -205,7 +218,11 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
 
 
 def profile_dataset(df: pd.DataFrame, target_column: str | None = None) -> dict[str, Any]:
-    """Create a profile summary that includes shape, quality, and column classes."""
+    """Create a profile summary that includes shape, quality, and column classes.
+
+    The resulting profile is the shared source of truth for the UI, reports,
+    ML recommendation logic, and the compact Flowise preview.
+    """
     classification = classify_columns(df, target_column=target_column)
     info_buffer = io.StringIO()
     df.info(buf=info_buffer)

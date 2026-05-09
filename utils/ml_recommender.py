@@ -206,6 +206,7 @@ ALGORITHM_MAP = {
 
 
 def _normalize_name(name: str) -> str:
+    """Normalize a column name so heuristic matching is resilient to formatting."""
     return name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
 
 
@@ -296,6 +297,8 @@ def _looks_like_main_nlp_text_feature(df: pd.DataFrame, text_columns: list[str])
         average_length = series.str.len().mean()
         average_word_count = series.str.split().str.len().mean()
 
+        # Favor columns that look like real user language rather than short
+        # labels, identifiers, or administrative metadata.
         if average_length > 20 and average_word_count >= 4:
             return column
 
@@ -303,6 +306,7 @@ def _looks_like_main_nlp_text_feature(df: pd.DataFrame, text_columns: list[str])
 
 
 def _binary_token_set(series: pd.Series) -> set[str]:
+    """Normalize observed values so binary label detection can compare safely."""
     non_null = series.dropna()
     return {str(value).strip().lower() for value in non_null.unique()}
 
@@ -329,6 +333,7 @@ def _is_binary_target(series: pd.Series) -> bool:
 
 
 def _is_low_cardinality_numeric_classification(series: pd.Series) -> bool:
+    """Detect numeric targets that behave like encoded class labels."""
     non_null = series.dropna()
     if non_null.empty or not is_numeric_dtype(series):
         return False
@@ -341,6 +346,7 @@ def _is_low_cardinality_numeric_classification(series: pd.Series) -> bool:
 
 
 def _is_continuous_numeric_target(series: pd.Series) -> bool:
+    """Detect numeric targets that behave more like regression labels than codes."""
     non_null = series.dropna()
     if non_null.empty or not is_numeric_dtype(series):
         return False
@@ -351,6 +357,8 @@ def _is_continuous_numeric_target(series: pd.Series) -> bool:
 
     unique_ratio = unique_count / len(non_null)
     numeric_range = non_null.max() - non_null.min()
+    # Small numeric ranges with only a few distinct values are often encoded
+    # classes, not true continuous targets.
     looks_like_small_class_codes = (
         unique_count <= 10 and float(numeric_range) <= max(10, unique_count * 2)
     )
@@ -361,6 +369,7 @@ def _is_continuous_numeric_target(series: pd.Series) -> bool:
 
 
 def _confidence_from_score(score: int) -> str:
+    """Convert internal target-ranking scores into UI-friendly confidence labels."""
     if score >= 8:
         return "High"
     if score >= 5:
@@ -369,6 +378,7 @@ def _confidence_from_score(score: int) -> str:
 
 
 def _is_unknown_dataset(column_types: dict[str, Any], row_count: int) -> bool:
+    """Detect cases where problem-type inference would be mostly guesswork."""
     feature_columns = (
         len(column_types["numeric_columns"])
         + len(column_types["categorical_columns"])
@@ -385,6 +395,7 @@ def _infer_problem_type_for_target(
     target_column: str,
     detected_text_column: str | None,
 ) -> tuple[str, str]:
+    """Infer the ML problem type from the chosen or suggested target column."""
     series = df[target_column]
     non_null = series.dropna()
     unique_count = non_null.nunique(dropna=True)
@@ -396,6 +407,9 @@ def _infer_problem_type_for_target(
         or _is_low_cardinality_numeric_classification(series)
         or normalized_name in NLP_TARGET_HINTS
     ):
+        # When a meaningful text feature exists and the target behaves like a
+        # label, treat the dataset as text classification instead of generic
+        # tabular classification.
         return (
             "NLP/Text Classification",
             f"A meaningful text column ({detected_text_column}) exists and '{target_column}' behaves like a label column.",
@@ -460,6 +474,8 @@ def suggest_target_columns(
         if non_null.empty:
             continue
 
+        # Name-based heuristics are combined with value-shape heuristics so the
+        # app can explain why a column was or was not suggested as a target.
         if normalized_name in INVALID_TARGET_HINTS:
             score -= 8
             reasons.append("Column name looks like an identifier or contact field, so it should usually not be a target.")
@@ -544,7 +560,12 @@ def recommend_ml_approach(
     problem_type: str,
     text_columns: list[str],
 ) -> dict[str, Any]:
-    """Recommend a likely ML problem type, target, and starter algorithms."""
+    """Recommend a likely ML problem type, target, and starter algorithms.
+
+    The function prefers conservative defaults. When the dataset does not
+    clearly support supervised learning, it falls back to clustering or an
+    explicit "needs more information" state instead of overconfident guesses.
+    """
     column_types = classify_columns(df, target_column=target_column)
     warnings: list[str] = []
     candidate_text_columns = detect_text_columns(df, target_column=target_column)
@@ -595,6 +616,8 @@ def recommend_ml_approach(
         suggested_target_column = suggested_target
 
     if problem_type != "Auto-detect":
+        # Manual selection wins over heuristics because user intent is more
+        # trustworthy than pattern-based inference.
         recommended_problem_type = problem_type
         reason = f"The user selected '{problem_type}', so that manual override is being respected."
     elif target_used is not None:
@@ -607,6 +630,8 @@ def recommend_ml_approach(
         recommended_problem_type = "Unknown / Needs More Information"
         reason = "The dataset appears to contain mostly identifiers or insufficient predictive features, so a reliable ML problem type cannot be inferred yet."
     else:
+        # Clustering is the safest automatic fallback when no reliable label is
+        # available, because it does not pretend a supervised target exists.
         recommended_problem_type = "Clustering"
         reason = "No target column was selected or confidently detected, so unsupervised grouping is the safest default."
 

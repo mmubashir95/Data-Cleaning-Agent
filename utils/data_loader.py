@@ -17,7 +17,8 @@ def load_dataset(uploaded_file) -> tuple[pd.DataFrame | None, str | None]:
     file_name = uploaded_file.name.lower()
 
     try:
-        # Reset the in-memory file pointer so repeated reads behave consistently.
+        # Streamlit uploads can be read multiple times during a session. Reset
+        # the pointer so validation, preview, and cleaning all see the same file.
         uploaded_file.seek(0)
 
         if file_name.endswith(".csv"):

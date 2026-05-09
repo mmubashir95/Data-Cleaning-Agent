@@ -79,7 +79,11 @@ def _get_stopwords() -> set[str]:
 
 
 def detect_text_columns(dataframe: pd.DataFrame, target_column: str | None = None) -> list[str]:
-    """Detect likely NLP/free-text columns using names and content heuristics."""
+    """Detect likely NLP/free-text columns using names and content heuristics.
+
+    The goal is to separate real language fields from short categorical labels
+    so later cleaning steps do not one-hot encode essay-like content.
+    """
     detected_columns: list[str] = []
 
     for column in dataframe.columns:
@@ -158,7 +162,11 @@ def clean_text_columns(
     remove_stopwords: bool = True,
     use_stemming: bool = False,
 ) -> tuple[pd.DataFrame, list[str], list[str], dict[str, dict[str, str]]]:
-    """Overwrite text columns with cleaned text and keep original backups."""
+    """Overwrite text columns with cleaned text and keep original backups.
+
+    Backup columns are preserved so users can compare before/after text and so
+    lightweight NLP cleanup remains reversible at the reporting layer.
+    """
     cleaned = dataframe.copy()
     cleaned_columns: list[str] = []
     original_backup_columns: list[str] = []
@@ -170,6 +178,8 @@ def clean_text_columns(
 
         try:
             original_series = cleaned[column].fillna("").astype(str)
+            # Keep the raw text beside the cleaned version so downstream users
+            # can audit what normalization changed.
             cleaned[f"{column}_original"] = original_series
             cleaned[column] = original_series.apply(
                 lambda value: preprocess_text(
@@ -187,6 +197,8 @@ def clean_text_columns(
 
         for raw_text, cleaned_text in zip(original_series.tolist(), cleaned[column].tolist()):
             if raw_text.strip():
+                # Store one example per column for reports instead of the full
+                # text corpus to keep outputs compact and privacy-aware.
                 before_after_examples[column] = {
                     "before": raw_text,
                     "after": cleaned_text,

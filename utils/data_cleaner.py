@@ -21,7 +21,12 @@ def _get_mode_or_unknown(series: pd.Series) -> Any:
 
 
 def _should_convert_to_numeric(series: pd.Series) -> bool:
-    """Check whether an object column looks safely convertible to numeric."""
+    """Check whether an object column looks safely convertible to numeric.
+
+    The threshold is intentionally conservative so mixed columns are not
+    coerced into numeric form too aggressively, which would silently replace
+    many original values with ``NaN``.
+    """
     non_null = series.dropna()
     if non_null.empty:
         return False
@@ -33,7 +38,11 @@ def _should_convert_to_numeric(series: pd.Series) -> bool:
 
 
 def _should_convert_to_datetime(series: pd.Series, column_name: str) -> bool:
-    """Check whether an object column looks safely convertible to datetime."""
+    """Check whether an object column looks safely convertible to datetime.
+
+    Conversion is gated by both name/content hints and a success ratio so
+    free-form text is not misclassified as dates.
+    """
     non_null = series.dropna()
     if len(non_null) < 2:
         return False
@@ -59,7 +68,12 @@ def clean_dataset(
     options: dict[str, bool],
     target_column: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Apply the selected starter cleaning steps to a validated dataset."""
+    """Apply the selected starter cleaning steps to a validated dataset.
+
+    The pipeline favors safe, explainable operations over aggressive cleaning.
+    Each step records what happened or why it was skipped so reports remain
+    auditable for demos, viva explanations, and downstream ML preparation.
+    """
     cleaned_df = df.copy(deep=True)
     cleaning_steps: list[str] = []
     skipped_steps: list[str] = []
@@ -97,7 +111,8 @@ def clean_dataset(
         cleaning_steps.append(message)
         skipped_steps.append(message)
 
-    # Pre-cleaning validation is assumed to have already passed upstream.
+    # Validation runs upstream so the cleaning pipeline can focus on safe data
+    # transformation instead of repeating structural checks.
     if options.get("remove_duplicates", False):
         cleaned_df = cleaned_df.drop_duplicates()
         duplicates_removed = original_rows - len(cleaned_df)
@@ -109,6 +124,8 @@ def clean_dataset(
     if fix_data_types_selected:
         for column in cleaned_df.columns:
             if column == target_column:
+                # Preserve the target as-is so feature cleanup does not
+                # accidentally change the label semantics used for ML inference.
                 continue
 
             series = cleaned_df[column]
@@ -137,7 +154,8 @@ def clean_dataset(
                         "Skipped because the column does not look reliably numeric or date-like."
                     )
             except Exception:
-                # Skip unsafe conversions so the app continues without crashing.
+                # Type conversion is best-effort. Skipping unsafe columns keeps
+                # the cleaning run usable instead of failing the whole dataset.
                 skipped_type_conversion_columns[column] = (
                     "Skipped because safe type conversion failed for this column."
                 )
@@ -174,6 +192,8 @@ def clean_dataset(
                 continue
 
             if pd.api.types.is_numeric_dtype(cleaned_df[column]):
+                # Median is safer than mean for dirty datasets because it is
+                # less sensitive to extreme values that may still be present.
                 median_value = np.median(cleaned_df[column].dropna())
 
                 if pd.isna(median_value):
@@ -189,6 +209,8 @@ def clean_dataset(
                     "fill_value": str(fill_value),
                 }
             else:
+                # Mode preserves the most common category and is easier to
+                # justify than model-based imputation in a beginner workflow.
                 mode_values = cleaned_df[column].mode(dropna=True)
 
                 if not mode_values.empty:
@@ -225,6 +247,8 @@ def clean_dataset(
 
         for column in numeric_columns:
             if column == target_column:
+                # Avoid altering the supervised label distribution during
+                # feature cleaning. Target treatment is workflow-specific.
                 continue
 
             series = cleaned_df[column].dropna()
@@ -248,6 +272,8 @@ def clean_dataset(
             if outlier_count == 0:
                 continue
 
+            # Cap rather than drop so potentially valid rare cases are retained
+            # and row count remains stable for the learner's analysis.
             cleaned_df[column] = cleaned_df[column].clip(lower=lower_bound, upper=upper_bound)
             outlier_summary.append(
                 {
@@ -284,6 +310,8 @@ def clean_dataset(
 
         if candidate_columns:
             original_column_count = len(cleaned_df.columns)
+            # Free-text columns are excluded here because one-hot encoding them
+            # would explode dimensionality and produce poor features.
             cleaned_df = pd.get_dummies(
                 cleaned_df,
                 columns=candidate_columns,
@@ -305,6 +333,9 @@ def clean_dataset(
             )
 
         if target_column and target_column in classification["categorical_columns"]:
+            # Keep target encoding separate from feature encoding so the app
+            # does not accidentally leak label-processing assumptions into the
+            # generic cleaning pipeline.
             target_encoding_recommendation = (
                 f"Target column '{target_column}' looks categorical. Keep it separate from feature "
                 "encoding and only encode it later if the chosen ML workflow requires it."
@@ -316,6 +347,8 @@ def clean_dataset(
         candidate_text_columns = detect_text_columns(cleaned_df, target_column=target_column)
 
         if candidate_text_columns:
+            # Text cleaning stays lightweight here. The goal is to normalize raw
+            # text safely before vectorization, not to perform model-specific NLP.
             (
                 cleaned_df,
                 cleaned_text_columns,
@@ -375,6 +408,9 @@ def clean_dataset(
                 else:
                     scaler = StandardScaler()
                     scaler_used = "StandardScaler"
+                    # Reference stats are captured before scaling so the report
+                    # can explain what "standardized" means without recomputing
+                    # values later from transformed data.
                     scaling_reference_stats = {
                         column: {
                             "mean_before_scaling": float(np.mean(cleaned_df[column])),
@@ -398,6 +434,8 @@ def clean_dataset(
                 )
             except Exception:
                 scaler_used = scaler_choice
+                # Scaling failure should not destroy the rest of the cleaning
+                # result; it is a useful but non-essential transformation.
                 record_skipped_step(
                     "Scaling was selected, but numeric scaling could not be applied safely, so this step was skipped."
                 )
@@ -412,6 +450,8 @@ def clean_dataset(
     missing_values_after = cleaned_df.isnull().sum().to_dict()
     cleaned_classification = classify_columns(cleaned_df, target_column=target_column)
 
+    # Capture a compact before/after view so the report can explain impact
+    # without re-running expensive profiling logic.
     before_vs_after_summary = {
         "metrics": [
             {
@@ -447,6 +487,8 @@ def clean_dataset(
         ]
     }
 
+    # This structured summary is intentionally verbose because it powers the
+    # UI, JSON report, Flowise explanation context, and viva summary.
     cleaning_summary = {
         "original_rows": original_rows,
         "original_columns": original_columns,

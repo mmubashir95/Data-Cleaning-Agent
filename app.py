@@ -27,6 +27,9 @@ from utils.data_validator import validate_dataset
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report, make_safe_stem
 
+# The AI prompt explicitly tells Flowise to rely on the Python-generated
+# profile. This keeps exact dataset facts grounded in code instead of model
+# guesses and prevents the assistant from asking for the full file again.
 FLOWISE_CONTEXT_INSTRUCTION = (
     "Important: a compact Python-generated dataset profile, cleaning report, and small "
     "preview will be provided by the Python app. If Python-generated dataset profile is "
@@ -413,7 +416,12 @@ def build_flowise_prompt(
     *,
     custom_prompt: str | None = None,
 ) -> str | None:
-    """Build the final AI prompt from reusable templates and dataset summary."""
+    """Build the final AI prompt from reusable templates and dataset summary.
+
+    The dataset summary is not interpolated here because it is embedded later
+    inside the Flowise request payload. Keeping prompt selection separate from
+    profile injection makes the safety boundary easier to audit.
+    """
     if selected_prompt_type == CUSTOM_PROMPT_OPTION:
         cleaned_custom_prompt = (custom_prompt or "").strip()
         if not cleaned_custom_prompt:
@@ -443,7 +451,12 @@ def render_flowise_explanation_section(
     dataset_identity: str | None = None,
     file_name: str | None = None,
 ) -> None:
-    """Render the Flowise explanation UI using only summarized dataset context."""
+    """Render the Flowise explanation UI using only summarized dataset context.
+
+    This section is intentionally isolated from the cleaning pipeline so AI
+    availability never determines whether profiling, cleaning, or reporting can
+    complete.
+    """
     st.subheader("AI Agent Explanation")
 
     dataset_state_key = f"{key_prefix}_flowise_dataset_identity"
@@ -746,7 +759,11 @@ def render_uploaded_dataset(
     selected_problem_type: str,
     cleaning_options: dict[str, bool],
 ) -> None:
-    """Display dataset details after a file has been uploaded."""
+    """Display dataset details after a file has been uploaded.
+
+    The flow deliberately runs as validate -> profile -> recommend -> explain
+    -> clean so users can inspect issues before applying transformations.
+    """
     dataframe, error_message = load_dataset(uploaded_file)
 
     if error_message:
@@ -824,6 +841,9 @@ def render_uploaded_dataset(
 
     if st.button("Clean Dataset"):
         try:
+            # Heavy processing stays in Python because exact row/column counts,
+            # missing-value handling, scaling, and file generation must be
+            # deterministic and should not depend on LLM output.
             cleaned_df, cleaning_summary = clean_dataset(
                 dataframe,
                 options=cleaning_options,
