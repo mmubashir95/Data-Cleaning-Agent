@@ -237,7 +237,9 @@ def build_flowise_profile_object(
         "dropped_reference_columns": _to_json_safe(
             cleaning_report.get("dropped_reference_columns", [])
         ),
+        "dataset_outputs": _to_json_safe(cleaning_report.get("dataset_outputs", {})),
         "ai_limitations": (
+            "The system may generate both a human-readable cleaned dataset and a fully ML-ready dataset. "
             "The dataset may support future recommendation or ranking systems after preprocessing, "
             "but no recommendation model has been trained in this stage."
         ),

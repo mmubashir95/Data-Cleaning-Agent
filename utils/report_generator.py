@@ -171,6 +171,17 @@ def generate_cleaning_report(
         "dropped_reference_columns": dropped_reference_columns,
         "recommendation_ready": cleaning_summary.get("recommendation_ready", False)
         or ml_recommendation.get("recommendation_ready", False),
+        "ecommerce_preprocessing": {
+            "availability_normalized": "availability" in normalized_categorical_columns,
+            "near_duplicate_detection_applied": cleaning_summary.get("semantic_duplicate_rows_removed", 0) >= 0,
+            "exact_duplicates_removed": cleaning_summary.get("exact_duplicate_rows_removed", 0),
+            "near_duplicates_removed": cleaning_summary.get("near_duplicates_removed", 0),
+            "deduplication_strategy": cleaning_summary.get("deduplication_strategy"),
+            "original_numeric_columns_preserved": cleaning_summary.get("original_numeric_columns_preserved", False),
+            "scaled_columns_created": cleaning_summary.get("scaled_columns_created", []),
+            "domain_outlier_rules_applied": cleaning_summary.get("domain_outlier_rules_applied", False),
+            "domain_outlier_adjustments": cleaning_summary.get("domain_outlier_adjustments", []),
+        },
         "options_used": options_used,
         "cleaning_actions": cleaning_actions,
         "nlp_cleaning_summary": {
@@ -203,7 +214,23 @@ def generate_cleaning_report(
         "skipped_steps": cleaning_summary.get("skipped_steps", []),
         "output_files": {
             "cleaned_csv_path": cleaned_file_path,
+            "readable_cleaned_csv_path": cleaning_summary.get("readable_cleaned_csv_path"),
+            "ml_ready_csv_path": cleaning_summary.get("ml_ready_csv_path"),
             "report_path": report_path,
+        },
+        "dataset_outputs": {
+            "readable_cleaned_dataset_description": (
+                "Human-readable cleaned dataset with preserved numeric values and separate scaled columns."
+                if ecommerce_preprocessing_applied
+                else "Single cleaned dataset exported by the generic workflow."
+            ),
+            "ml_ready_dataset_description": (
+                "Model-ready dataset containing scaled numeric features and encoded categorical features for future recommendation or ranking models."
+                if ecommerce_preprocessing_applied
+                else None
+            ),
+            "columns_in_readable_dataset": cleaning_summary.get("readable_dataset_columns", []),
+            "columns_in_ml_ready_dataset": cleaning_summary.get("ml_ready_dataset_columns", []),
         },
     }
 

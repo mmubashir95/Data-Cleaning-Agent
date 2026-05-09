@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from utils.ecommerce_preprocessing import (
+    apply_mobile_domain_outlier_rules,
     build_ecommerce_preprocessed_view,
     build_semantic_product_key,
     detect_mobile_ecommerce_dataset,
@@ -114,6 +115,12 @@ def clean_dataset(
     recommendation_ready = False
     columns_excluded_from_ml: list[str] = []
     semantic_duplicate_rows_removed = 0
+    exact_duplicate_rows_removed = 0
+    deduplication_strategy = "exact row matching"
+    scaled_columns_created: list[str] = []
+    original_numeric_columns_preserved = False
+    domain_outlier_rules_applied = False
+    domain_outlier_adjustments: list[dict[str, Any]] = []
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -130,6 +137,7 @@ def clean_dataset(
     if options.get("remove_duplicates", False):
         cleaned_df = cleaned_df.drop_duplicates()
         duplicates_removed = original_rows - len(cleaned_df)
+        exact_duplicate_rows_removed = duplicates_removed
         cleaning_steps.append(f"Removed {duplicates_removed} duplicate rows.")
     else:
         duplicates_removed = 0
@@ -159,6 +167,7 @@ def clean_dataset(
             cleaning_steps.append(
                 "Applied mobile e-commerce preprocessing to parse scraped numeric fields, normalize brand names, and remove reference-only URL columns from the ML-ready output."
             )
+            deduplication_strategy = "exact row matching plus normalized product-name, brand, and numeric-price matching"
 
         if options.get("remove_duplicates", False) and {"product_name", "brand", "price"}.intersection(cleaned_df.columns):
             semantic_keys = build_semantic_product_key(cleaned_df)
@@ -314,6 +323,13 @@ def clean_dataset(
         )
 
     if handle_outliers_selected:
+        if ecommerce_preprocessing_applied:
+            cleaned_df, domain_outlier_adjustments = apply_mobile_domain_outlier_rules(cleaned_df)
+            domain_outlier_rules_applied = True
+            if domain_outlier_adjustments:
+                cleaning_steps.append(
+                    "Applied domain-safe outlier validation rules for mobile phone fields such as rating, battery capacity, and screen size."
+                )
         numeric_columns = cleaned_df.select_dtypes(include=["number"]).columns
 
         for column in numeric_columns:
@@ -324,6 +340,11 @@ def clean_dataset(
 
             series = cleaned_df[column].dropna()
             if len(series) < 4:
+                continue
+
+            if ecommerce_preprocessing_applied and column in {"rating", "battery_mah", "screen_size_inches"}:
+                # These fields use domain-safe ranges instead of generic IQR
+                # capping so valid phone specifications are not over-cleaned.
                 continue
 
             q1 = series.quantile(0.25)
@@ -380,6 +401,7 @@ def clean_dataset(
             and column not in dropped_reference_columns
             and column not in columns_excluded_from_ml
             and column != "product_name"
+            and not (ecommerce_preprocessing_applied and column in {"brand", "availability"})
         ]
 
         if candidate_columns:
@@ -512,13 +534,21 @@ def clean_dataset(
                         "StandardScaler standardizes values around mean 0 and standard deviation 1."
                     )
 
-                cleaned_df[feature_numeric_columns] = scaler.fit_transform(
-                    cleaned_df[feature_numeric_columns]
-                )
+                scaled_result = scaler.fit_transform(cleaned_df[feature_numeric_columns])
                 scaled_columns = feature_numeric_columns
+                if ecommerce_preprocessing_applied:
+                    original_numeric_columns_preserved = True
+                    scaled_columns_created = [f"{column}_scaled" for column in feature_numeric_columns]
+                    cleaned_df[scaled_columns_created] = scaled_result
+                else:
+                    cleaned_df[feature_numeric_columns] = scaled_result
                 cleaning_steps.append(
                     "Scaled numeric feature columns: " + ", ".join(scaled_columns) + "."
                 )
+                if ecommerce_preprocessing_applied and scaled_columns_created:
+                    cleaning_steps.append(
+                        "Created separate scaled feature columns while preserving readable numeric values for viva and review."
+                    )
                 cleaning_steps.append(
                     "Scaling helps algorithms like Logistic Regression, Linear Regression, KNN, SVM, and Neural Networks."
                 )
@@ -593,7 +623,10 @@ def clean_dataset(
         "skipped_type_conversion_columns": skipped_type_conversion_columns,
         "type_conversion_notes": type_conversion_notes,
         "duplicate_rows_removed": duplicates_removed,
+        "exact_duplicate_rows_removed": exact_duplicate_rows_removed,
         "semantic_duplicate_rows_removed": semantic_duplicate_rows_removed,
+        "near_duplicates_removed": semantic_duplicate_rows_removed,
+        "deduplication_strategy": deduplication_strategy,
         "columns_where_missing_values_were_filled": filled_columns,
         "outlier_summary": outlier_summary,
         "encoded_columns": encoded_columns,
@@ -604,6 +637,7 @@ def clean_dataset(
         "nlp_original_backup_columns": nlp_original_backup_columns,
         "nlp_before_after_examples": nlp_before_after_examples,
         "scaled_columns": scaled_columns,
+        "scaled_columns_created": scaled_columns_created,
         "scaler_used": scaler_used,
         "scaling_reference_stats": scaling_reference_stats,
         "ecommerce_preprocessing_applied": ecommerce_preprocessing_applied,
@@ -613,6 +647,9 @@ def clean_dataset(
         "dropped_reference_columns": sorted(set(dropped_reference_columns)),
         "columns_excluded_from_ml": sorted(set(columns_excluded_from_ml)),
         "recommendation_ready": recommendation_ready,
+        "original_numeric_columns_preserved": original_numeric_columns_preserved,
+        "domain_outlier_rules_applied": domain_outlier_rules_applied,
+        "domain_outlier_adjustments": domain_outlier_adjustments,
         "before_vs_after_summary": before_vs_after_summary,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,

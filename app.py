@@ -27,6 +27,7 @@ from utils.data_loader import load_dataset
 from utils.data_profiler import profile_dataset
 from utils.data_validator import validate_dataset
 from utils.ecommerce_preprocessing import (
+    build_ecommerce_output_datasets,
     build_ecommerce_preprocessed_view,
     detect_mobile_ecommerce_dataset,
 )
@@ -791,6 +792,9 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.info(
             "The current stage prepares the product data for future recommendation or ranking workflows. No recommendation model is trained yet."
         )
+        st.info(
+            "The system can generate two outputs: a human-readable cleaned dataset with readable numeric values plus separate scaled columns, and a fully ML-ready dataset containing only numeric scaled and encoded features."
+        )
 
     algorithm_recommendation = ml_recommendation.get("algorithm_recommendation", {})
     beginner_choice = algorithm_recommendation.get("beginner_friendly_first_choice")
@@ -1074,6 +1078,9 @@ def render_cleaning_results(
         st.write(
             f"Normalized categorical columns: {cleaning_summary.get('normalized_categorical_columns', [])}"
         )
+        st.write(
+            f"Scaled columns created: {cleaning_summary.get('scaled_columns_created', [])}"
+        )
 
     st.subheader("Cleaning Impact Summary")
     comparison_columns = st.columns(4)
@@ -1153,6 +1160,9 @@ def render_cleaning_results(
         st.info(
             "The cleaned dataset is more suitable for future product recommendation or ranking workflows, but no model has been trained in this stage."
         )
+        st.info(
+            "Two outputs are available for this dataset: a human-readable cleaned CSV for viva and review, and a fully ML-ready CSV for future recommendation or ranking models."
+        )
 
     if not cleaning_summary["options_used"]["handle_missing_values"]:
         st.info("Missing value handling was not selected, so missing values were not changed.")
@@ -1198,6 +1208,8 @@ def render_cleaning_results(
         )
         st.write("Scaler used:", cleaning_summary.get("scaler_used"))
         st.write("Type conversion notes:", cleaning_summary.get("type_conversion_notes", []))
+        st.write("Deduplication strategy:", cleaning_summary.get("deduplication_strategy"))
+        st.write("Domain outlier adjustments:", cleaning_summary.get("domain_outlier_adjustments", []))
 
         st.write("Missing values before cleaning:")
         st.dataframe(
@@ -1235,12 +1247,39 @@ def render_cleaning_results(
     )
 
     st.subheader("8. Download Output Files")
-    st.download_button(
-        "Download Cleaned CSV",
-        data=cleaned_df.to_csv(index=False).encode("utf-8"),
-        file_name=cleaned_csv_name,
-        mime="text/csv",
-    )
+    if cleaning_summary.get("ecommerce_preprocessing_applied"):
+        readable_dataset = cleaning_summary.get("readable_cleaned_dataset")
+        ml_ready_dataset = cleaning_summary.get("ml_ready_dataset")
+        readable_csv_name = cleaning_summary.get("readable_cleaned_csv_name", cleaned_csv_name)
+        ml_ready_csv_name = cleaning_summary.get("ml_ready_csv_name", f"ml_ready_{cleaned_csv_path.stem}.csv")
+
+        if isinstance(readable_dataset, pd.DataFrame):
+            st.download_button(
+                "Download Human-Readable Cleaned CSV",
+                data=readable_dataset.to_csv(index=False).encode("utf-8"),
+                file_name=readable_csv_name,
+                mime="text/csv",
+            )
+        if isinstance(ml_ready_dataset, pd.DataFrame):
+            st.download_button(
+                "Download Fully ML-Ready CSV",
+                data=ml_ready_dataset.to_csv(index=False).encode("utf-8"),
+                file_name=ml_ready_csv_name,
+                mime="text/csv",
+            )
+        st.download_button(
+            "Download Cleaned CSV",
+            data=cleaned_df.to_csv(index=False).encode("utf-8"),
+            file_name=cleaned_csv_name,
+            mime="text/csv",
+        )
+    else:
+        st.download_button(
+            "Download Cleaned CSV",
+            data=cleaned_df.to_csv(index=False).encode("utf-8"),
+            file_name=cleaned_csv_name,
+            mime="text/csv",
+        )
     st.download_button(
         "Download Cleaning Report",
         data=json.dumps(cleaning_report, indent=2),
@@ -1256,6 +1295,10 @@ def render_cleaning_results(
             mime="text/markdown",
         )
     st.success(f"Cleaned CSV saved to: {cleaned_csv_path}")
+    if cleaning_summary.get("readable_cleaned_csv_path"):
+        st.success(f"Human-readable cleaned CSV saved to: {cleaning_summary['readable_cleaned_csv_path']}")
+    if cleaning_summary.get("ml_ready_csv_path"):
+        st.success(f"ML-ready CSV saved to: {cleaning_summary['ml_ready_csv_path']}")
     st.success(f"Cleaning report saved to: {cleaning_report_path}")
 
     with st.expander("View JSON report output"):
@@ -1361,6 +1404,23 @@ def render_uploaded_dataset(
             cleaned_csv_path = Path("output") / cleaned_csv_name
             cleaned_csv_path.parent.mkdir(parents=True, exist_ok=True)
             cleaned_df.to_csv(cleaned_csv_path, index=False)
+
+            if cleaning_summary.get("ecommerce_preprocessing_applied"):
+                readable_dataset, ml_ready_dataset = build_ecommerce_output_datasets(cleaned_df)
+                readable_csv_name = f"cleaned_readable_{make_safe_stem(uploaded_file.name)}.csv"
+                ml_ready_csv_name = f"ml_ready_{make_safe_stem(uploaded_file.name)}.csv"
+                readable_csv_path = Path("output") / readable_csv_name
+                ml_ready_csv_path = Path("output") / ml_ready_csv_name
+                readable_dataset.to_csv(readable_csv_path, index=False)
+                ml_ready_dataset.to_csv(ml_ready_csv_path, index=False)
+                cleaning_summary["readable_cleaned_dataset"] = readable_dataset
+                cleaning_summary["ml_ready_dataset"] = ml_ready_dataset
+                cleaning_summary["readable_cleaned_csv_name"] = readable_csv_name
+                cleaning_summary["ml_ready_csv_name"] = ml_ready_csv_name
+                cleaning_summary["readable_cleaned_csv_path"] = str(readable_csv_path)
+                cleaning_summary["ml_ready_csv_path"] = str(ml_ready_csv_path)
+                cleaning_summary["readable_dataset_columns"] = list(readable_dataset.columns)
+                cleaning_summary["ml_ready_dataset_columns"] = list(ml_ready_dataset.columns)
 
             cleaning_report, cleaning_report_path = generate_cleaning_report(
                 profile,

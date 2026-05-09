@@ -11,11 +11,13 @@ from streamlit.testing.v1 import AppTest
 from utils.data_cleaner import clean_dataset
 from utils.data_profiler import profile_dataset
 from utils.ecommerce_preprocessing import (
+    build_ecommerce_output_datasets,
     build_ecommerce_preprocessed_view,
     clean_price_column,
     clean_rating_column,
     clean_review_count_column,
     detect_mobile_ecommerce_dataset,
+    normalize_availability_column,
 )
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report
@@ -105,6 +107,13 @@ class TestEcommerceMobileDataset(unittest.TestCase):
         self.assertTrue(pd.isna(rating.iloc[2]))
         self.assertEqual(reviews.tolist()[:2], [1245.0, 999.0])
         self.assertTrue(pd.isna(reviews.iloc[2]))
+        normalized_availability = normalize_availability_column(
+            pd.Series(["in stock", "Available", "Out-of-stock", "Pre Order", "Limited Stock"])
+        )
+        self.assertEqual(
+            normalized_availability.tolist(),
+            ["In Stock", "In Stock", "Out of Stock", "Pre Order", "Low Stock"],
+        )
 
     def test_ecommerce_dataset_gets_domain_specific_preprocessing(self):
         df = _mobile_products_df()
@@ -115,6 +124,7 @@ class TestEcommerceMobileDataset(unittest.TestCase):
         self.assertIn("price", preview_metadata["cleaned_numeric_columns"])
         self.assertIn("ram_gb", preview_metadata["extracted_feature_columns"])
         self.assertIn("product_url", preview_metadata["dropped_reference_columns"])
+        self.assertIn("availability", preview_metadata["normalized_categorical_columns"])
         self.assertTrue(pd.api.types.is_numeric_dtype(preview_df["price"]))
         self.assertIn("ram_gb", preview_df.columns)
         self.assertIn("storage_gb", preview_df.columns)
@@ -128,8 +138,8 @@ class TestEcommerceMobileDataset(unittest.TestCase):
                 "fix_data_types": True,
                 "handle_outliers": True,
                 "encode_categorical": True,
-                "scale_numeric": False,
-                "scaler_choice": None,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
                 "nlp_cleaning": True,
             },
             target_column=None,
@@ -153,12 +163,29 @@ class TestEcommerceMobileDataset(unittest.TestCase):
         self.assertIn("screen_size_inches", cleaned_df.columns)
         self.assertNotIn("product_url", cleaned_df.columns)
         self.assertIn("brand", summary["normalized_categorical_columns"])
+        self.assertIn("availability", summary["normalized_categorical_columns"])
         self.assertIn("product_url", summary["dropped_reference_columns"])
+        self.assertTrue(summary["original_numeric_columns_preserved"] or not summary["scaled_columns_created"])
         self.assertEqual(recommendation["recommended_problem_type"], "Recommendation / Ranking Readiness")
         self.assertTrue(recommendation["recommendation_ready"])
         self.assertTrue(report["ecommerce_preprocessing_applied"])
         self.assertTrue(report["recommendation_ready"])
         self.assertIn("ram_gb", report["extracted_feature_columns"])
+
+        readable_df, ml_ready_df = build_ecommerce_output_datasets(cleaned_df)
+        self.assertIn("brand", readable_df.columns)
+        self.assertIn("availability", readable_df.columns)
+        self.assertNotIn("product_url", readable_df.columns)
+        self.assertTrue(all(not column.endswith("_scaled") or column in readable_df.columns for column in readable_df.columns))
+        self.assertTrue(all(column.endswith("_scaled") or column.startswith("brand_") or column.startswith("availability_") for column in ml_ready_df.columns))
+
+        if summary["scaled_columns_created"]:
+            self.assertIn("price_scaled", summary["scaled_columns_created"])
+            self.assertIn("price", cleaned_df.columns)
+            self.assertIn("price_scaled", cleaned_df.columns)
+        self.assertTrue(report["ecommerce_preprocessing"]["availability_normalized"])
+        self.assertIn("readable_cleaned_csv_path", report["output_files"])
+        self.assertIn("ml_ready_csv_path", report["output_files"])
 
     def test_generic_dataset_path_remains_unchanged(self):
         df = _generic_house_prices_df()

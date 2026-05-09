@@ -56,6 +56,23 @@ CATEGORICAL_ECOMMERCE_COLUMN_HINTS = {
     "availability",
 }
 
+AVAILABILITY_NORMALIZATION_MAP = {
+    "in stock": "In Stock",
+    "instock": "In Stock",
+    "in-stock": "In Stock",
+    "available": "In Stock",
+    "out of stock": "Out of Stock",
+    "outofstock": "Out of Stock",
+    "out-of-stock": "Out of Stock",
+    "unavailable": "Out of Stock",
+    "not available": "Out of Stock",
+    "pre order": "Pre Order",
+    "pre-order": "Pre Order",
+    "preorder": "Pre Order",
+    "low stock": "Low Stock",
+    "limited stock": "Low Stock",
+}
+
 
 def normalize_column_name(name: Any) -> str:
     """Normalize a column name for resilient domain matching."""
@@ -249,6 +266,146 @@ def normalize_product_name_column(series: pd.Series) -> pd.Series:
     return pd.Series(normalized_values, index=series.index, dtype="object")
 
 
+def normalize_availability_column(series: pd.Series) -> pd.Series:
+    """Normalize stock-status values into a small set of readable labels."""
+    normalized_values: list[str | None] = []
+    for value in series:
+        if value is None or pd.isna(value):
+            normalized_values.append(None)
+            continue
+
+        cleaned_text = re.sub(r"[\-_]+", " ", str(value).strip().lower())
+        cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
+        normalized_values.append(
+            AVAILABILITY_NORMALIZATION_MAP.get(cleaned_text, cleaned_text.title() if cleaned_text else None)
+        )
+
+    return pd.Series(normalized_values, index=series.index, dtype="object")
+
+
+def _normalize_product_name_for_matching(value: Any) -> str:
+    """Normalize product names for near-duplicate comparison only."""
+    if value is None or pd.isna(value):
+        return ""
+
+    text = normalize_product_name_column(pd.Series([value])).iloc[0] or ""
+    text = text.lower()
+    text = text.replace("/", " ").replace("+", " ")
+    text = re.sub(r"(\d+)\s*gb", r"\1gb", text)
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def create_product_dedup_key(dataframe: pd.DataFrame) -> pd.Series:
+    """Create a normalized key for product-level near-duplicate detection."""
+    normalized_name = (
+        dataframe["product_name"].apply(_normalize_product_name_for_matching)
+        if "product_name" in dataframe.columns
+        else pd.Series("", index=dataframe.index)
+    )
+    normalized_brand = (
+        normalize_brand_column(dataframe["brand"]).fillna("").astype(str).str.lower().str.strip()
+        if "brand" in dataframe.columns
+        else pd.Series("", index=dataframe.index)
+    )
+    normalized_price = (
+        clean_price_column(dataframe["price"]).fillna(-1).astype(float).round(0).astype(int).astype(str)
+        if "price" in dataframe.columns
+        else pd.Series("", index=dataframe.index)
+    )
+    return normalized_name + "|" + normalized_brand + "|" + normalized_price
+
+
+def apply_mobile_domain_outlier_rules(
+    dataframe: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    """Apply domain-safe bounds for common mobile-phone numeric fields."""
+    adjusted_df = dataframe.copy()
+    adjustments: list[dict[str, Any]] = []
+
+    def _record_adjustment(column: str, action: str, count: int, rule: str) -> None:
+        if count > 0:
+            adjustments.append(
+                {
+                    "column_name": column,
+                    "action_taken": action,
+                    "affected_rows": int(count),
+                    "rule": rule,
+                }
+            )
+
+    if "rating" in adjusted_df.columns and pd.api.types.is_numeric_dtype(adjusted_df["rating"]):
+        below_zero = adjusted_df["rating"] < 0
+        above_five = adjusted_df["rating"] > 5
+        adjusted_df.loc[below_zero, "rating"] = 0
+        adjusted_df.loc[above_five, "rating"] = 5
+        _record_adjustment("rating", "capped_to_valid_range", int(below_zero.sum() + above_five.sum()), "0 to 5")
+
+    if "battery_mah" in adjusted_df.columns and pd.api.types.is_numeric_dtype(adjusted_df["battery_mah"]):
+        invalid_battery = (adjusted_df["battery_mah"] < 1000) | (adjusted_df["battery_mah"] > 10000)
+        adjusted_df.loc[invalid_battery, "battery_mah"] = pd.NA
+        _record_adjustment("battery_mah", "flagged_as_invalid", int(invalid_battery.sum()), "1000 to 10000 mAh")
+
+    if "screen_size_inches" in adjusted_df.columns and pd.api.types.is_numeric_dtype(adjusted_df["screen_size_inches"]):
+        invalid_screen = (adjusted_df["screen_size_inches"] < 3) | (adjusted_df["screen_size_inches"] > 10)
+        adjusted_df.loc[invalid_screen, "screen_size_inches"] = pd.NA
+        _record_adjustment("screen_size_inches", "flagged_as_invalid", int(invalid_screen.sum()), "3 to 10 inches")
+
+    return adjusted_df, adjustments
+
+
+def build_ecommerce_output_datasets(
+    dataframe: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Create human-readable and ML-ready e-commerce output datasets."""
+    readable_df = dataframe.copy(deep=True)
+
+    readable_priority_columns = [
+        "product_name",
+        "brand",
+        "availability",
+        "price",
+        "rating",
+        "review_count",
+        "ram_gb",
+        "storage_gb",
+        "battery_mah",
+        "screen_size_inches",
+        "price_scaled",
+        "rating_scaled",
+        "review_count_scaled",
+        "ram_gb_scaled",
+        "storage_gb_scaled",
+        "battery_mah_scaled",
+        "screen_size_inches_scaled",
+        "camera",
+        "processor",
+    ]
+    readable_columns = [column for column in readable_priority_columns if column in readable_df.columns]
+    readable_df = readable_df.loc[:, readable_columns]
+
+    ml_ready_base = readable_df.copy(deep=True)
+    categorical_columns = [
+        column for column in ["brand", "availability"] if column in ml_ready_base.columns
+    ]
+    if categorical_columns:
+        ml_ready_base = pd.get_dummies(
+            ml_ready_base,
+            columns=categorical_columns,
+            drop_first=False,
+        )
+
+    ml_ready_columns = [
+        column
+        for column in ml_ready_base.columns
+        if column.endswith("_scaled") or column.startswith("brand_") or column.startswith("availability_")
+    ]
+    ml_ready_df = ml_ready_base.loc[:, ml_ready_columns]
+
+    return readable_df, ml_ready_df
+
+
 def build_ecommerce_preprocessed_view(
     dataframe: pd.DataFrame,
     *,
@@ -284,6 +441,10 @@ def build_ecommerce_preprocessed_view(
     if "brand" in preprocessed_df.columns:
         preprocessed_df["brand"] = normalize_brand_column(preprocessed_df["brand"])
         metadata["normalized_categorical_columns"].append("brand")
+
+    if "availability" in preprocessed_df.columns:
+        preprocessed_df["availability"] = normalize_availability_column(preprocessed_df["availability"])
+        metadata["normalized_categorical_columns"].append("availability")
 
     if "price" in preprocessed_df.columns:
         preprocessed_df["price"] = clean_price_column(preprocessed_df["price"])
@@ -336,20 +497,4 @@ def build_ecommerce_preprocessed_view(
 
 def build_semantic_product_key(dataframe: pd.DataFrame) -> pd.Series:
     """Create a normalized deduplication key for product-style rows."""
-    normalized_name = (
-        normalize_product_name_column(dataframe["product_name"])
-        .fillna("")
-        .astype(str)
-        .str.lower()
-    ) if "product_name" in dataframe.columns else pd.Series("", index=dataframe.index)
-    normalized_brand = (
-        normalize_brand_column(dataframe["brand"])
-        .fillna("")
-        .astype(str)
-        .str.lower()
-    ) if "brand" in dataframe.columns else pd.Series("", index=dataframe.index)
-    normalized_price = (
-        clean_price_column(dataframe["price"]).fillna(-1).astype(float).round(0).astype(int).astype(str)
-    ) if "price" in dataframe.columns else pd.Series("", index=dataframe.index)
-
-    return normalized_name + "|" + normalized_brand + "|" + normalized_price
+    return create_product_dedup_key(dataframe)
