@@ -10,8 +10,10 @@ import pandas as pd
 
 from src.ai.flowise_client import (
     FLOWISE_RESPONSE_PREFIX,
+    build_flowise_request_payload,
     build_default_flowise_metadata,
     build_flowise_file_preview,
+    validate_flowise_profile_text,
     query_flowise_agent,
 )
 
@@ -93,14 +95,55 @@ class TestFlowiseClient(unittest.TestCase):
         self.assertEqual(len(preview_json["sample_row_columns_included"]), 25)
         self.assertEqual(preview_json["sample_row_omitted_column_count"], 15)
 
+    def test_build_flowise_request_payload_embeds_profile_in_question_only(self):
+        profile_text = json.dumps(
+            {
+                "shape": {"rows": 891, "columns": 12},
+                "column_names": ["Survived", "Pclass"],
+                "sample_rows": [{"Survived": 0, "Pclass": 3}],
+            }
+        )
+
+        payload, metadata = build_flowise_request_payload(
+            "Tell me dataset shape",
+            profile_text,
+        )
+
+        self.assertIn("Python-generated dataset profile:", payload["question"])
+        self.assertIn("\"rows\": 891", payload["question"])
+        self.assertIn("Important: Use this profile as the dataset source.", payload["question"])
+        self.assertNotIn("file", payload)
+        self.assertEqual(payload["overrideConfig"], {})
+        self.assertTrue(metadata["profile_sent_to_flowise"])
+        self.assertEqual(metadata["profile_keys_sent"], ["column_names", "sample_rows", "shape"])
+        self.assertEqual(metadata["preview_rows_sent"], 1)
+        self.assertFalse(metadata["full_dataset_sent_to_flowise"])
+
+    def test_validate_flowise_profile_text_rejects_incomplete_profile(self):
+        is_valid, parsed = validate_flowise_profile_text(json.dumps({"shape": {"rows": 1, "columns": 2}}))
+
+        self.assertFalse(is_valid)
+        self.assertEqual(parsed["shape"]["rows"], 1)
+
     @patch("src.ai.flowise_client.requests.post", side_effect=Exception("network down"))
     def test_query_flowise_agent_handles_failure_safely(self, mocked_post):
-        result = query_flowise_agent("Explain the dataset", file_summary=json.dumps({"sample_rows": [1, 2]}))
+        result = query_flowise_agent(
+            "Explain the dataset",
+            file_summary=json.dumps(
+                {
+                    "shape": {"rows": 2, "columns": 2},
+                    "column_names": ["a", "b"],
+                    "sample_rows": [1, 2],
+                }
+            ),
+        )
 
         self.assertFalse(result["success"])
         self.assertEqual(result["error"], "Flowise Agent is currently unavailable. The Python cleaning report is still available.")
         self.assertEqual(result["metadata"]["flowise_status"], "error")
         self.assertEqual(result["metadata"]["preview_rows_sent"], 2)
+        self.assertIn("question", result["payload"])
+        self.assertNotIn("file", result["payload"])
         mocked_post.assert_called_once()
 
     @patch("src.ai.flowise_client.requests.post")
@@ -110,17 +153,30 @@ class TestFlowiseClient(unittest.TestCase):
         mocked_response.json.return_value = {"text": "The dataset is suitable for classification."}
         mocked_post.return_value = mocked_response
 
-        result = query_flowise_agent("Explain the dataset", file_summary=json.dumps({"sample_rows": [{}, {}]}))
+        result = query_flowise_agent(
+            "Explain the dataset",
+            file_summary=json.dumps(
+                {
+                    "shape": {"rows": 2, "columns": 2},
+                    "column_names": ["a", "b"],
+                    "sample_rows": [{}, {}],
+                }
+            ),
+        )
 
         self.assertTrue(result["success"])
         self.assertTrue(result["answer"].startswith(FLOWISE_RESPONSE_PREFIX))
         self.assertEqual(result["metadata"]["preview_rows_sent"], 2)
         self.assertEqual(result["metadata"]["flowise_status"], "success")
+        self.assertIn("question", result["payload"])
+        self.assertNotIn("file", result["payload"])
 
     def test_default_flowise_metadata_is_report_safe(self):
         metadata = build_default_flowise_metadata()
 
         self.assertFalse(metadata["flowise_called"])
+        self.assertFalse(metadata["profile_sent_to_flowise"])
+        self.assertEqual(metadata["profile_keys_sent"], [])
         self.assertFalse(metadata["full_dataset_sent_to_flowise"])
         self.assertEqual(metadata["preview_rows_sent"], 0)
         self.assertEqual(metadata["flowise_status"], "skipped")

@@ -71,6 +71,8 @@ def build_default_flowise_metadata() -> dict[str, Any]:
     """Return a default metadata block for report output before any AI call happens."""
     return {
         "flowise_called": False,
+        "profile_sent_to_flowise": False,
+        "profile_keys_sent": [],
         "full_dataset_sent_to_flowise": False,
         "preview_rows_sent": 0,
         "flowise_status": "skipped",
@@ -229,6 +231,28 @@ def build_flowise_dataset_summary(
     return json.dumps(_to_json_safe(summary), indent=2, default=str)
 
 
+def validate_flowise_profile_text(profile_text: str | None) -> tuple[bool, dict[str, Any]]:
+    """Check whether the profile contains the minimum fields required for Flowise."""
+    if not profile_text or not profile_text.strip():
+        return False, {}
+
+    try:
+        profile_data = json.loads(profile_text)
+    except json.JSONDecodeError:
+        return False, {}
+
+    has_shape = isinstance(profile_data.get("shape"), dict) and {
+        "rows",
+        "columns",
+    }.issubset(profile_data["shape"].keys())
+    has_columns = bool(profile_data.get("column_names"))
+    has_sample_rows = isinstance(profile_data.get("sample_rows"), list)
+    if not (has_shape and has_columns and has_sample_rows):
+        return False, profile_data
+
+    return True, profile_data
+
+
 def build_flowise_file_preview(
     df,
     target_column=None,
@@ -254,25 +278,47 @@ def build_flowise_file_preview(
     )
 
 
-def build_flowise_combined_question(question: str, file_preview: str | None = None) -> str:
-    """Build the actual prompt sent to Flowise.
-
-    Some Flowise agents respond better when the dataset preview appears directly
-    inside the question text rather than relying only on a separate file field.
-    The Streamlit UI still keeps the user's question box clean; Python injects
-    the preview only in the outbound API request.
-    """
+def build_flowise_combined_question(question: str, profile_text: str | None = None) -> str:
+    """Build the actual prompt sent to Flowise with the profile embedded in the question."""
     cleaned_question = (question or "").strip()
-    if not file_preview:
+    if not profile_text:
         return cleaned_question
 
     instruction_block = (
-        "Use the attached Python-generated dataset profile to answer the question. "
-        "Do not ask the user to paste the dataset again. "
-        "Do not request the full CSV or Excel file.\n\n"
+        "If Python-generated dataset profile is provided, use it as the source of truth. "
+        "Do not ask for uploaded file content. Only ask for manual details if BOTH uploaded "
+        "file content and Python-generated profile are missing.\n\n"
         "User question:\n"
+        f"{cleaned_question}\n\n"
+        "Python-generated dataset profile:\n"
+        f"{profile_text}\n\n"
+        "Important: Use this profile as the dataset source. The full raw CSV was not sent."
     )
-    return instruction_block + cleaned_question
+    return instruction_block
+
+
+def build_flowise_request_payload(
+    question: str,
+    profile_text: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build the exact payload sent to Flowise and derived metadata."""
+    is_valid_profile, profile_data = validate_flowise_profile_text(profile_text)
+    combined_question = build_flowise_combined_question(question, profile_text if is_valid_profile else None)
+    preview_rows_sent = len(profile_data.get("sample_rows", [])) if profile_data else 0
+    profile_keys_sent = sorted(profile_data.keys()) if profile_data else []
+
+    payload = {
+        "question": combined_question,
+        "overrideConfig": {},
+    }
+    metadata = {
+        "flowise_called": True,
+        "profile_sent_to_flowise": is_valid_profile,
+        "profile_keys_sent": profile_keys_sent,
+        "full_dataset_sent_to_flowise": False,
+        "preview_rows_sent": preview_rows_sent,
+    }
+    return payload, metadata
 
 
 def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
@@ -282,16 +328,8 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
     or report generation. Python remains responsible for all data processing.
     Flowise is used only as an optional AI explanation layer.
     """
-    payload = {
-        "question": question,
-        "file": file_summary,
-    }
-    preview_rows_sent = 0
-    if file_summary:
-        try:
-            preview_rows_sent = len(json.loads(file_summary).get("sample_rows", []))
-        except Exception:
-            preview_rows_sent = 0
+    payload, request_metadata = build_flowise_request_payload(question, file_summary)
+    preview_rows_sent = request_metadata["preview_rows_sent"]
 
     try:
         response = requests.post(FLOWISE_PREDICTION_URL, json=payload, timeout=60)
@@ -301,12 +339,11 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
             "metadata": {
-                "flowise_called": True,
-                "full_dataset_sent_to_flowise": False,
-                "preview_rows_sent": preview_rows_sent,
+                **request_metadata,
                 "flowise_status": "error",
                 "flowise_error_message": "Request timed out.",
             },
+            "payload": payload,
         }
     except requests.ConnectionError:
         logger.warning("Flowise connection error.")
@@ -314,12 +351,11 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
             "metadata": {
-                "flowise_called": True,
-                "full_dataset_sent_to_flowise": False,
-                "preview_rows_sent": preview_rows_sent,
+                **request_metadata,
                 "flowise_status": "error",
                 "flowise_error_message": "Connection failed.",
             },
+            "payload": payload,
         }
     except requests.RequestException as exc:
         logger.warning("Flowise request error: %s", exc.__class__.__name__)
@@ -327,12 +363,11 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
             "metadata": {
-                "flowise_called": True,
-                "full_dataset_sent_to_flowise": False,
-                "preview_rows_sent": preview_rows_sent,
+                **request_metadata,
                 "flowise_status": "error",
                 "flowise_error_message": str(exc),
             },
+            "payload": payload,
         }
     except Exception as exc:
         logger.exception("Unexpected Flowise request failure.")
@@ -340,12 +375,11 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
             "metadata": {
-                "flowise_called": True,
-                "full_dataset_sent_to_flowise": False,
-                "preview_rows_sent": preview_rows_sent,
+                **request_metadata,
                 "flowise_status": "error",
                 "flowise_error_message": str(exc),
             },
+            "payload": payload,
         }
 
     if response.status_code != 200:
@@ -354,12 +388,11 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
             "metadata": {
-                "flowise_called": True,
-                "full_dataset_sent_to_flowise": False,
-                "preview_rows_sent": preview_rows_sent,
+                **request_metadata,
                 "flowise_status": "error",
                 "flowise_error_message": f"HTTP {response.status_code}",
             },
+            "payload": payload,
         }
 
     try:
@@ -370,12 +403,11 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
             "metadata": {
-                "flowise_called": True,
-                "full_dataset_sent_to_flowise": False,
-                "preview_rows_sent": preview_rows_sent,
+                **request_metadata,
                 "flowise_status": "error",
                 "flowise_error_message": "Invalid JSON response.",
             },
+            "payload": payload,
         }
 
     return {
@@ -383,10 +415,9 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
         "answer": extract_flowise_answer(response_json),
         "raw_response": response_json,
         "metadata": {
-            "flowise_called": True,
-            "full_dataset_sent_to_flowise": False,
-            "preview_rows_sent": preview_rows_sent,
+            **request_metadata,
             "flowise_status": "success",
             "flowise_error_message": None,
         },
+        "payload": payload,
     }

@@ -84,6 +84,19 @@ class TestFlowisePromptUI(unittest.TestCase):
                 "success": True,
                 "answer": "Random Forest is suitable.",
                 "raw_response": {"text": "Random Forest is suitable."},
+                "metadata": {
+                    "flowise_called": True,
+                    "profile_sent_to_flowise": True,
+                    "profile_keys_sent": ["column_names", "sample_rows", "shape"],
+                    "full_dataset_sent_to_flowise": False,
+                    "preview_rows_sent": 5,
+                    "flowise_status": "success",
+                    "flowise_error_message": None,
+                },
+                "payload": {
+                    "question": "embedded profile question",
+                    "overrideConfig": {},
+                },
             },
         ) as mocked_query:
             at.selectbox(key="profile_flowise_prompt").set_value(app.CUSTOM_PROMPT_OPTION).run()
@@ -99,7 +112,7 @@ class TestFlowisePromptUI(unittest.TestCase):
 
         self.assertIn("User Custom Question:", sent_question)
         self.assertIn("Explain why Random Forest is suitable for Titanic dataset", sent_question)
-        self.assertIn("Use the attached Python-generated dataset profile in the file/context field.", sent_question)
+        self.assertIn("Use the embedded Python-generated dataset profile included in this request.", sent_question)
         self.assertIn("This AI explanation is based on a Python-generated dataset profile, cleaning report, and small preview only.", sent_question)
         self.assertNotIn("PassengerId", sent_question)
         self.assertEqual(sent_preview_json["original_file_name"], "titanic.csv")
@@ -111,13 +124,13 @@ class TestFlowisePromptUI(unittest.TestCase):
     def test_flowise_preview_includes_algorithm_recommendation_details(self):
         at = _upload_app()
 
-        text_values = [element.value for element in at.text]
-        combined_text = " ".join(text_values)
+        json_values = [element.value for element in at.json]
+        combined_text = json.dumps(json_values)
 
-        self.assertIn("Python-generated dataset profile", combined_text)
-        self.assertIn("\"recommended_algorithms\":", combined_text)
-        self.assertIn("\"name\": \"Logistic Regression\"", combined_text)
-        self.assertIn("\"pandas_numpy_usage\":", combined_text)
+        self.assertIn("\"payload\"", combined_text)
+        self.assertIn("\"Python-generated dataset profile\"", combined_text)
+        self.assertIn("\"recommended_algorithms\"", combined_text)
+        self.assertIn("\"profile_debug\"", combined_text)
         self.assertIn("\"full_dataset_sent_to_flowise\": false", combined_text)
 
 

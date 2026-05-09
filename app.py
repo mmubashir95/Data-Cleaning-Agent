@@ -14,9 +14,11 @@ import streamlit as st
 
 from src.ai.flowise_client import (
     FLOWISE_PROFILE_NOTE,
+    build_flowise_request_payload,
     build_default_flowise_metadata,
     build_flowise_file_preview,
     query_flowise_agent,
+    validate_flowise_profile_text,
 )
 from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
@@ -26,9 +28,11 @@ from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report, make_safe_stem
 
 FLOWISE_CONTEXT_INSTRUCTION = (
-    "Important: the file field contains a compact Python-generated dataset profile, "
-    "cleaning report, and small preview only. Do not ask for the dataset again. "
-    "Do not request the full file. Use only the provided profile and preview to answer. "
+    "Important: a compact Python-generated dataset profile, cleaning report, and small "
+    "preview will be provided by the Python app. If Python-generated dataset profile is "
+    "provided, use it as the source of truth. Do not ask for uploaded file content. "
+    "Only ask for manual details if BOTH uploaded file content and Python-generated profile "
+    "are missing. Do not request the full file. Use only the provided profile and preview to answer. "
     "If something is missing, make a reasonable inference and clearly label it as an inference. "
     "Your explanation must clearly cover the dataset type, problem type, key data quality issues, "
     "cleaning actions performed, skipped actions and why, the recommended algorithm and reason, "
@@ -412,14 +416,14 @@ def build_flowise_prompt(
             f"{FLOWISE_CONTEXT_INSTRUCTION}\n\n"
             "User Custom Question:\n"
             f"{cleaned_custom_prompt}\n\n"
-            "Use the attached Python-generated dataset profile in the file/context field."
+            "Use the embedded Python-generated dataset profile included in this request."
         )
 
     selected_template = PROMPT_TEMPLATES[selected_prompt_type]
     return (
         f"{FLOWISE_CONTEXT_INSTRUCTION}\n\n"
         f"{selected_template}\n\n"
-        "Use the attached Python-generated dataset profile in the file/context field."
+        "Use the embedded Python-generated dataset profile included in this request."
     )
 
 
@@ -440,6 +444,7 @@ def render_flowise_explanation_section(
     answer_state_key = "last_flowise_answer"
     raw_response_state_key = "last_flowise_raw_response"
     metadata_state_key = f"{key_prefix}_flowise_metadata"
+    payload_state_key = f"{key_prefix}_flowise_payload"
 
     # Clear stale Flowise output when the active dataset changes so a previous
     # explanation is not shown for a different upload.
@@ -448,6 +453,7 @@ def render_flowise_explanation_section(
         st.session_state.pop(answer_state_key, None)
         st.session_state.pop(raw_response_state_key, None)
         st.session_state[metadata_state_key] = build_default_flowise_metadata()
+        st.session_state.pop(payload_state_key, None)
 
     if metadata_state_key not in st.session_state:
         st.session_state[metadata_state_key] = build_default_flowise_metadata()
@@ -494,8 +500,29 @@ def render_flowise_explanation_section(
         st.error("The uploaded dataset could not be summarized for the AI agent.")
         return
 
+    is_valid_profile, profile_data = validate_flowise_profile_text(file_preview)
+    if not is_valid_profile:
+        st.error("The Python-generated dataset profile is empty or incomplete, so Flowise cannot be called safely.")
+        return
+
+    preview_payload, preview_metadata = build_flowise_request_payload(
+        build_flowise_prompt(selected_prompt, file_preview, custom_prompt=custom_prompt)
+        or "",
+        file_preview,
+    )
+
     with st.expander("Preview sent to AI Agent"):
-        st.text(file_preview)
+        st.json(
+            {
+                "payload": preview_payload,
+                "profile_debug": {
+                    "profile_sent_to_flowise": preview_metadata["profile_sent_to_flowise"],
+                    "profile_keys_sent": preview_metadata["profile_keys_sent"],
+                    "preview_rows_sent": preview_metadata["preview_rows_sent"],
+                    "full_dataset_sent_to_flowise": preview_metadata["full_dataset_sent_to_flowise"],
+                },
+            }
+        )
 
     if st.button("Ask Flowise Agent", key=f"{key_prefix}_ask_flowise"):
         if selected_prompt == CUSTOM_PROMPT_OPTION and not (custom_prompt or "").strip():
@@ -511,6 +538,14 @@ def render_flowise_explanation_section(
             st.warning("Please enter a custom AI question.")
             return
 
+        is_valid_profile, profile_data = validate_flowise_profile_text(file_preview)
+        if not is_valid_profile:
+            st.error("The Python-generated dataset profile is empty or incomplete, so Flowise cannot be called safely.")
+            return
+        if not profile_data.get("shape") or "column_names" not in profile_data or "sample_rows" not in profile_data:
+            st.error("The Python-generated dataset profile is missing required keys for Flowise.")
+            return
+
         # Flowise is optional. If it fails, the Streamlit app should continue
         # to provide the Python-generated profiling, cleaning summary, and downloads.
         with st.spinner("Asking Flowise Agent..."):
@@ -520,6 +555,7 @@ def render_flowise_explanation_section(
             "metadata",
             build_default_flowise_metadata(),
         )
+        st.session_state[payload_state_key] = result.get("payload")
 
         if not result["success"]:
             st.error(result["error"])
