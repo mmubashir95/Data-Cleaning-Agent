@@ -5,5 +5,8 @@ reports/*
 output/*
 !output/.gitkeep
 
+input/*
+!output/.gitkeep
+
 # Local QA datasets
 qa_tests/datasets/*.csv

@@ -358,9 +358,19 @@ def apply_mobile_domain_outlier_rules(
 def build_ecommerce_output_datasets(
     dataframe: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Create human-readable and ML-ready e-commerce output datasets."""
-    readable_df = dataframe.copy(deep=True)
+    """Create human-readable and ML-ready e-commerce output datasets.
 
+    Works whether brand/availability arrive as raw string columns (not yet
+    encoded) or as one-hot columns produced by the main cleaning pipeline.
+    The readable dataset always exposes recognisable label columns; the
+    ML-ready dataset contains only numeric scaled and encoded features.
+    """
+    has_raw_brand = "brand" in dataframe.columns
+    has_raw_availability = "availability" in dataframe.columns
+    brand_encoded_cols = sorted(c for c in dataframe.columns if c.startswith("brand_"))
+    availability_encoded_cols = sorted(c for c in dataframe.columns if c.startswith("availability_"))
+
+    # ── READABLE DATASET ────────────────────────────────────────────────────
     readable_priority_columns = [
         "product_name",
         "brand",
@@ -382,26 +392,43 @@ def build_ecommerce_output_datasets(
         "camera",
         "processor",
     ]
-    readable_columns = [column for column in readable_priority_columns if column in readable_df.columns]
-    readable_df = readable_df.loc[:, readable_columns]
+    readable_columns = [c for c in readable_priority_columns if c in dataframe.columns]
+    readable_df = dataframe[readable_columns].copy(deep=True)
 
-    ml_ready_base = readable_df.copy(deep=True)
-    categorical_columns = [
-        column for column in ["brand", "availability"] if column in ml_ready_base.columns
-    ]
-    if categorical_columns:
-        ml_ready_base = pd.get_dummies(
-            ml_ready_base,
-            columns=categorical_columns,
-            drop_first=False,
+    # When the main pipeline has already one-hot encoded brand/availability,
+    # reconstruct human-readable label columns so the CSV stays interpretable.
+    if not has_raw_brand and brand_encoded_cols:
+        encoded_int = dataframe[brand_encoded_cols].astype(int)
+        readable_df.insert(
+            min(1, len(readable_df.columns)),
+            "brand",
+            encoded_int.idxmax(axis=1).str.replace("brand_", "", regex=False),
+        )
+    if not has_raw_availability and availability_encoded_cols:
+        encoded_int = dataframe[availability_encoded_cols].astype(int)
+        insert_pos = (
+            readable_df.columns.tolist().index("brand") + 1
+            if "brand" in readable_df.columns
+            else min(2, len(readable_df.columns))
+        )
+        readable_df.insert(
+            insert_pos,
+            "availability",
+            encoded_int.idxmax(axis=1).str.replace("availability_", "", regex=False),
         )
 
+    # ── ML-READY DATASET ────────────────────────────────────────────────────
+    ml_ready_base = dataframe.copy(deep=True)
+    # Encode raw categoricals if the main pipeline left them unencoded.
+    to_encode = [c for c in ["brand", "availability"] if c in ml_ready_base.columns]
+    if to_encode:
+        ml_ready_base = pd.get_dummies(ml_ready_base, columns=to_encode, drop_first=False)
+
     ml_ready_columns = [
-        column
-        for column in ml_ready_base.columns
-        if column.endswith("_scaled") or column.startswith("brand_") or column.startswith("availability_")
+        c for c in ml_ready_base.columns
+        if c.endswith("_scaled") or c.startswith("brand_") or c.startswith("availability_")
     ]
-    ml_ready_df = ml_ready_base.loc[:, ml_ready_columns]
+    ml_ready_df = ml_ready_base[ml_ready_columns].copy(deep=True)
 
     return readable_df, ml_ready_df
 

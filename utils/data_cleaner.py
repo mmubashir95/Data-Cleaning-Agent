@@ -391,17 +391,24 @@ def clean_dataset(
     if encode_categorical_selected:
         classification = classify_columns(cleaned_df, target_column=target_column)
         detected_text_columns = set(detect_text_columns(cleaned_df, target_column=target_column))
+        # E-commerce categorical columns (brand, availability) are always safe to
+        # encode after domain normalization — bypass the text-detection filter for
+        # them so high brand-count ratios don't silently block encoding.
+        ecommerce_categorical_override = (
+            {col for col in {"brand", "availability"} if col in classification["categorical_columns"]}
+            if ecommerce_preprocessing_applied
+            else set()
+        )
         candidate_columns = [
             column
             for column in classification["categorical_columns"]
             if column != target_column
             and column in cleaned_df.columns
-            and column not in detected_text_columns
+            and (column not in detected_text_columns or column in ecommerce_categorical_override)
             and not str(column).endswith("_original")
             and column not in dropped_reference_columns
             and column not in columns_excluded_from_ml
             and column != "product_name"
-            and not (ecommerce_preprocessing_applied and column in {"brand", "availability"})
         ]
 
         if candidate_columns:
