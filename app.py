@@ -186,7 +186,11 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     """Show a beginner-friendly data quality summary and ML recommendation."""
     st.subheader("4. Data Quality Report")
 
-    st.write(f"Target column: {profile['target_column']}")
+    st.write(f"Selected Target Column: {ml_recommendation['selected_target_column']}")
+    st.write(f"Suggested Target Column: {ml_recommendation['suggested_target_column']}")
+    st.write(f"Suggested Problem Type: {ml_recommendation['suggested_problem_type']}")
+    st.write(f"Confidence Score: {ml_recommendation['target_detection_confidence']}")
+    st.write(f"Problem Type Reason: {ml_recommendation['problem_type_reason']}")
     st.write(f"Duplicate rows detected: {profile['duplicate_rows']}")
 
     columns_with_missing_values = [
@@ -197,7 +201,7 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     st.subheader("5. Recommended ML Algorithm")
     st.success(f"Recommended problem type: {ml_recommendation['recommended_problem_type']}")
     st.write(f"Reason: {ml_recommendation['reason']}")
-    st.write(f"Target Column: {ml_recommendation['target_column']}")
+    st.write(f"Target Column Used For Inference: {ml_recommendation['target_column_used_for_inference']}")
     st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
 
     for warning_message in ml_recommendation["warnings"]:
@@ -214,6 +218,7 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.write(f"Boolean Columns: {ml_recommendation['boolean_columns']}")
         st.write(f"Datetime Columns: {ml_recommendation['datetime_columns']}")
         st.write(f"ID-like Columns: {ml_recommendation['id_like_columns']}")
+        st.write("Top target suggestions:", ml_recommendation["target_detection_metadata"].get("top_suggestions", []))
 
 
 def build_flowise_prompt(
