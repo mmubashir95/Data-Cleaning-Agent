@@ -8,6 +8,7 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
 from utils.data_profiler import classify_columns
+from utils.ecommerce_preprocessing import detect_mobile_ecommerce_dataset
 from utils.nlp_cleaner import detect_text_columns
 
 CLASSIFICATION_TARGET_HINTS = {
@@ -196,6 +197,16 @@ ALGORITHM_MAP = {
             "reason": "DBSCAN can discover irregular clusters and isolate noise points.",
         },
     ],
+    "Recommendation / Ranking Readiness": [
+        {
+            "name": "Ranking or Recommendation Model Later",
+            "reason": "The dataset looks like a product catalog and is being prepared for future recommendation, ranking, or comparison workflows.",
+        },
+        {
+            "name": "Regression or Learning-to-Rank",
+            "reason": "After a clear user objective or preference signal is defined, the cleaned numeric product features can support price-value scoring or ranking models.",
+        },
+    ],
     "Unknown / Needs More Information": [
         {
             "name": "Ask user for more information",
@@ -258,6 +269,11 @@ def _build_algorithm_recommendation(
         summary = (
             "The app cannot recommend a reliable model yet. Please provide a target column "
             "or explain the prediction objective."
+        )
+    elif recommended_problem_type == "Recommendation / Ranking Readiness":
+        summary = (
+            "No explicit target variable is available. The dataset looks suitable for future "
+            "product recommendation, ranking, or comparison systems after preprocessing."
         )
     elif recommended_problem_type == "Clustering":
         summary = (
@@ -567,6 +583,7 @@ def recommend_ml_approach(
     explicit "needs more information" state instead of overconfident guesses.
     """
     column_types = classify_columns(df, target_column=target_column)
+    is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
     warnings: list[str] = []
     candidate_text_columns = detect_text_columns(df, target_column=target_column)
     detected_text_column = _looks_like_main_nlp_text_feature(df, candidate_text_columns)
@@ -606,6 +623,7 @@ def recommend_ml_approach(
             "id_like_columns": column_types["id_like_columns"],
             "algorithms": algorithms,
             "algorithm_recommendation": algorithm_recommendation,
+            "recommendation_ready": False,
         }
 
     if target_column is not None:
@@ -625,6 +643,12 @@ def recommend_ml_approach(
             df,
             target_used,
             detected_text_column,
+        )
+    elif is_ecommerce_dataset:
+        recommended_problem_type = "Recommendation / Ranking Readiness"
+        reason = (
+            "This dataset looks like a mobile-phone product catalog without an explicit target column, "
+            "so the safest interpretation is preparation for future recommendation or ranking workflows."
         )
     elif _is_unknown_dataset(column_types, len(df)):
         recommended_problem_type = "Unknown / Needs More Information"
@@ -679,4 +703,5 @@ def recommend_ml_approach(
         "id_like_columns": column_types["id_like_columns"],
         "algorithms": algorithms,
         "algorithm_recommendation": algorithm_recommendation,
+        "recommendation_ready": bool(is_ecommerce_dataset and target_used is None),
     }

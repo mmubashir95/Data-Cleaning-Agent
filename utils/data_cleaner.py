@@ -8,6 +8,11 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
+from utils.ecommerce_preprocessing import (
+    build_ecommerce_preprocessed_view,
+    build_semantic_product_key,
+    detect_mobile_ecommerce_dataset,
+)
 from utils.nlp_cleaner import clean_text_columns, detect_text_columns
 from utils.data_profiler import classify_columns
 
@@ -101,11 +106,20 @@ def clean_dataset(
     nlp_cleaning_actions: list[str] = []
     nlp_original_backup_columns: list[str] = []
     nlp_before_after_examples: dict[str, dict[str, str]] = {}
+    ecommerce_preprocessing_applied = False
+    cleaned_numeric_columns: list[str] = []
+    extracted_feature_columns: list[str] = []
+    normalized_categorical_columns: list[str] = []
+    dropped_reference_columns: list[str] = []
+    recommendation_ready = False
+    columns_excluded_from_ml: list[str] = []
+    semantic_duplicate_rows_removed = 0
 
     original_rows = len(df)
     original_columns = len(df.columns)
     missing_values_before = df.isnull().sum().to_dict()
     original_classification = classify_columns(df, target_column=target_column)
+    is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
 
     def record_skipped_step(message: str) -> None:
         cleaning_steps.append(message)
@@ -120,6 +134,42 @@ def clean_dataset(
     else:
         duplicates_removed = 0
         cleaning_steps.append("Skipped duplicate removal.")
+
+    if is_ecommerce_dataset:
+        ecommerce_view, ecommerce_metadata = build_ecommerce_preprocessed_view(
+            cleaned_df,
+            drop_reference_columns=True,
+        )
+        cleaned_df = ecommerce_view
+        ecommerce_preprocessing_applied = ecommerce_metadata.get(
+            "ecommerce_preprocessing_applied",
+            False,
+        )
+        cleaned_numeric_columns = ecommerce_metadata.get("cleaned_numeric_columns", [])
+        extracted_feature_columns = ecommerce_metadata.get("extracted_feature_columns", [])
+        normalized_categorical_columns = ecommerce_metadata.get(
+            "normalized_categorical_columns",
+            [],
+        )
+        dropped_reference_columns = ecommerce_metadata.get("dropped_reference_columns", [])
+        recommendation_ready = ecommerce_metadata.get("recommendation_ready", False)
+        columns_excluded_from_ml = ecommerce_metadata.get("raw_source_columns_excluded_from_ml", [])
+
+        if ecommerce_preprocessing_applied:
+            cleaning_steps.append(
+                "Applied mobile e-commerce preprocessing to parse scraped numeric fields, normalize brand names, and remove reference-only URL columns from the ML-ready output."
+            )
+
+        if options.get("remove_duplicates", False) and {"product_name", "brand", "price"}.intersection(cleaned_df.columns):
+            semantic_keys = build_semantic_product_key(cleaned_df)
+            before_semantic_dedup_rows = len(cleaned_df)
+            cleaned_df = cleaned_df.loc[~semantic_keys.duplicated()].copy()
+            semantic_duplicate_rows_removed = before_semantic_dedup_rows - len(cleaned_df)
+            duplicates_removed += semantic_duplicate_rows_removed
+            if semantic_duplicate_rows_removed > 0:
+                cleaning_steps.append(
+                    f"Removed {semantic_duplicate_rows_removed} near-duplicate product rows using normalized product name, brand, and price."
+                )
 
     if fix_data_types_selected:
         for column in cleaned_df.columns:
@@ -159,7 +209,28 @@ def clean_dataset(
                 skipped_type_conversion_columns[column] = (
                     "Skipped because safe type conversion failed for this column."
                 )
-                continue
+            continue
+
+        if ecommerce_preprocessing_applied and (cleaned_numeric_columns or extracted_feature_columns):
+            converted_numeric_columns = sorted(
+                set(converted_numeric_columns + cleaned_numeric_columns + extracted_feature_columns)
+            )
+            for column in cleaned_numeric_columns:
+                converted_columns.setdefault(
+                    column,
+                    {
+                        "converted_to": "numeric",
+                        "reason": "Scraped numeric text was converted into real numeric values for ML-ready preprocessing.",
+                    },
+                )
+            for column in extracted_feature_columns:
+                converted_columns.setdefault(
+                    column,
+                    {
+                        "converted_to": "numeric",
+                        "reason": "A numeric feature was extracted from a scraped device specification field.",
+                    },
+                )
 
         if converted_columns:
             converted_list = ", ".join(sorted(converted_columns.keys()))
@@ -306,6 +377,9 @@ def clean_dataset(
             and column in cleaned_df.columns
             and column not in detected_text_columns
             and not str(column).endswith("_original")
+            and column not in dropped_reference_columns
+            and column not in columns_excluded_from_ml
+            and column != "product_name"
         ]
 
         if candidate_columns:
@@ -345,6 +419,22 @@ def clean_dataset(
 
     if nlp_cleaning_selected:
         candidate_text_columns = detect_text_columns(cleaned_df, target_column=target_column)
+        if ecommerce_preprocessing_applied:
+            protected_text_columns = {
+                "product_name",
+                "brand",
+                "price",
+                "rating",
+                "review_count",
+                "ram",
+                "storage",
+                "battery",
+                "screen_size",
+                *dropped_reference_columns,
+            }
+            candidate_text_columns = [
+                column for column in candidate_text_columns if column not in protected_text_columns
+            ]
 
         if candidate_text_columns:
             # Text cleaning stays lightweight here. The goal is to normalize raw
@@ -503,6 +593,7 @@ def clean_dataset(
         "skipped_type_conversion_columns": skipped_type_conversion_columns,
         "type_conversion_notes": type_conversion_notes,
         "duplicate_rows_removed": duplicates_removed,
+        "semantic_duplicate_rows_removed": semantic_duplicate_rows_removed,
         "columns_where_missing_values_were_filled": filled_columns,
         "outlier_summary": outlier_summary,
         "encoded_columns": encoded_columns,
@@ -515,6 +606,13 @@ def clean_dataset(
         "scaled_columns": scaled_columns,
         "scaler_used": scaler_used,
         "scaling_reference_stats": scaling_reference_stats,
+        "ecommerce_preprocessing_applied": ecommerce_preprocessing_applied,
+        "cleaned_numeric_columns": sorted(set(cleaned_numeric_columns)),
+        "extracted_feature_columns": sorted(set(extracted_feature_columns)),
+        "normalized_categorical_columns": sorted(set(normalized_categorical_columns)),
+        "dropped_reference_columns": sorted(set(dropped_reference_columns)),
+        "columns_excluded_from_ml": sorted(set(columns_excluded_from_ml)),
+        "recommendation_ready": recommendation_ready,
         "before_vs_after_summary": before_vs_after_summary,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,

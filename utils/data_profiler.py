@@ -13,6 +13,16 @@ from pandas.api.types import (
     is_object_dtype,
     is_string_dtype,
 )
+from utils.ecommerce_preprocessing import (
+    CATEGORICAL_ECOMMERCE_COLUMN_HINTS,
+    E_COMMERCE_NUMERIC_COLUMN_HINTS,
+    REFERENCE_TEXT_COLUMN_HINTS,
+    build_ecommerce_preprocessed_view,
+    detect_mobile_ecommerce_dataset,
+    get_reference_columns,
+    is_reference_column,
+    normalize_column_name,
+)
 
 
 def _normalize_boolean_token(value: Any) -> str:
@@ -139,6 +149,15 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
     categorical_unique_ratio_threshold = 0.2
     categorical_unique_count_threshold = 30
     moderate_unique_count_threshold = 50
+    generic_text_name_hints = {
+        "name",
+        "message",
+        "comment",
+        "review",
+        "description",
+        "ticket",
+        "cabin",
+    }
 
     row_count = len(df)
 
@@ -149,14 +168,29 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
         "datetime_columns": [],
         "boolean_columns": [],
         "id_like_columns": [],
+        "reference_columns": [],
         "target_column": target_column,
     }
 
     if df.empty or len(df.columns) == 0:
         return classification
 
+    is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
+    ecommerce_view, ecommerce_metadata = build_ecommerce_preprocessed_view(df)
+
     for column in df.columns:
-        series = df[column]
+        series = ecommerce_view[column] if column in ecommerce_view.columns else df[column]
+        normalized_name = normalize_column_name(column)
+
+        if is_ecommerce_dataset and is_reference_column(column):
+            classification["reference_columns"].append(column)
+            classification["id_like_columns"].append(column)
+            classification["text_columns"].append(column)
+            continue
+
+        if any(hint in normalized_name for hint in generic_text_name_hints):
+            classification["text_columns"].append(column)
+            continue
 
         if _looks_datetime(series, column):
             classification["datetime_columns"].append(column)
@@ -178,6 +212,12 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
                 classification["id_like_columns"].append(column)
             continue
 
+        if is_ecommerce_dataset and normalized_name in E_COMMERCE_NUMERIC_COLUMN_HINTS:
+            numeric_candidate = series.dropna()
+            if not numeric_candidate.empty:
+                classification["numeric_columns"].append(column)
+                continue
+
         if is_object_dtype(series) or is_string_dtype(series) or isinstance(
             series.dtype, pd.CategoricalDtype
         ):
@@ -189,6 +229,14 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
 
             if _is_id_like(series, column, row_count):
                 classification["id_like_columns"].append(column)
+
+            if is_ecommerce_dataset and normalized_name in CATEGORICAL_ECOMMERCE_COLUMN_HINTS:
+                classification["categorical_columns"].append(column)
+                continue
+
+            if is_ecommerce_dataset and normalized_name in REFERENCE_TEXT_COLUMN_HINTS:
+                classification["text_columns"].append(column)
+                continue
 
             # Treat repeated low-cardinality values as categorical features so
             # downstream cleaning and algorithm selection remain beginner-safe.
@@ -236,5 +284,15 @@ def profile_dataset(df: pd.DataFrame, target_column: str | None = None) -> dict[
         "missing_values": df.isna().sum().to_dict(),
         "duplicate_rows": int(df.duplicated().sum()),
     }
+    if detect_mobile_ecommerce_dataset(df.columns):
+        _, ecommerce_metadata = build_ecommerce_preprocessed_view(df)
+        profile["reference_columns"] = ecommerce_metadata.get("reference_columns", get_reference_columns(df.columns))
+        profile["ecommerce_preprocessing_preview"] = {
+            "ecommerce_preprocessing_applied": ecommerce_metadata.get("ecommerce_preprocessing_applied", False),
+            "cleaned_numeric_columns": ecommerce_metadata.get("cleaned_numeric_columns", []),
+            "extracted_feature_columns": ecommerce_metadata.get("extracted_feature_columns", []),
+            "normalized_categorical_columns": ecommerce_metadata.get("normalized_categorical_columns", []),
+            "recommendation_ready": ecommerce_metadata.get("recommendation_ready", False),
+        }
     profile.update(classification)
     return profile

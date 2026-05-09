@@ -26,6 +26,10 @@ from utils.data_cleaner import clean_dataset
 from utils.data_loader import load_dataset
 from utils.data_profiler import profile_dataset
 from utils.data_validator import validate_dataset
+from utils.ecommerce_preprocessing import (
+    build_ecommerce_preprocessed_view,
+    detect_mobile_ecommerce_dataset,
+)
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report, make_safe_stem
 
@@ -41,7 +45,9 @@ FLOWISE_CONTEXT_INSTRUCTION = (
     "If something is missing, make a reasonable inference and clearly label it as an inference. "
     "Your explanation must clearly cover the dataset type, problem type, key data quality issues, "
     "cleaning actions performed, skipped actions and why, the recommended algorithm and reason, "
-    "and the limitation that the answer is based on the profile and preview only.\n\n"
+    "and the limitation that the answer is based on the profile and preview only. "
+    "If the dataset looks suitable for recommendation or ranking later, explain that it is only "
+    "preparation-readiness and that no recommendation model is trained yet.\n\n"
     f"{FLOWISE_PROFILE_NOTE}"
 )
 
@@ -174,6 +180,8 @@ def render_dataset_profile(profile: dict) -> None:
     st.write(f"Datetime columns: {profile['datetime_columns']}")
     st.write(f"Boolean columns: {profile['boolean_columns']}")
     st.write(f"ID-like columns: {profile['id_like_columns']}")
+    if profile.get("reference_columns"):
+        st.write(f"Reference columns: {profile['reference_columns']}")
 
     with st.expander("View detailed dataset profile"):
         st.write("Data types:")
@@ -420,6 +428,111 @@ def _render_visualization_metric_cards(dataframe: pd.DataFrame, profile: dict) -
     metric_columns[5].metric("Categorical Columns", f"{len(profile.get('categorical_columns', [])):,}")
 
 
+def _render_ecommerce_visualizations(dataframe: pd.DataFrame) -> None:
+    """Render mobile-commerce specific charts when parsed numeric features exist."""
+    with st.expander("E-commerce Product Insights", expanded=False):
+        ecommerce_view, ecommerce_metadata = build_ecommerce_preprocessed_view(dataframe)
+        if not ecommerce_metadata.get("ecommerce_preprocessing_applied", False):
+            st.info("Skipped e-commerce visualizations because this dataset does not look like a mobile product catalog.")
+            return
+
+        sampled_df, sample_note = _sample_dataframe_for_visuals(
+            ecommerce_view,
+            max_rows=MAX_VISUALIZATION_ROWS,
+        )
+
+        chart_rendered = False
+        if "price" in sampled_df.columns:
+            price_series = sampled_df["price"].dropna()
+            if not price_series.empty:
+                price_chart = (
+                    alt.Chart(pd.DataFrame({"price": price_series}))
+                    .mark_bar(color="#2563eb")
+                    .encode(
+                        x=alt.X("price:Q", bin=alt.Bin(maxbins=25), title="Price"),
+                        y=alt.Y("count():Q", title="Product Count"),
+                    )
+                    .properties(height=280, title="Price Distribution")
+                )
+                st.altair_chart(price_chart, use_container_width=True)
+                chart_rendered = True
+
+        if "rating" in sampled_df.columns:
+            rating_series = sampled_df["rating"].dropna()
+            if not rating_series.empty:
+                rating_chart = (
+                    alt.Chart(pd.DataFrame({"rating": rating_series}))
+                    .mark_bar(color="#0f766e")
+                    .encode(
+                        x=alt.X("rating:Q", bin=alt.Bin(maxbins=20), title="Rating"),
+                        y=alt.Y("count():Q", title="Product Count"),
+                    )
+                    .properties(height=280, title="Rating Distribution")
+                )
+                st.altair_chart(rating_chart, use_container_width=True)
+                chart_rendered = True
+
+        if {"ram_gb", "price"}.issubset(sampled_df.columns):
+            ram_price_df = sampled_df[["ram_gb", "price"]].dropna()
+            if not ram_price_df.empty:
+                ram_price_chart = (
+                    alt.Chart(ram_price_df)
+                    .mark_circle(size=70, color="#7c3aed")
+                    .encode(
+                        x=alt.X("ram_gb:Q", title="RAM (GB)"),
+                        y=alt.Y("price:Q", title="Price"),
+                        tooltip=["ram_gb", "price"],
+                    )
+                    .properties(height=320, title="RAM vs Price")
+                )
+                st.altair_chart(ram_price_chart, use_container_width=True)
+                chart_rendered = True
+
+        if {"storage_gb", "price"}.issubset(sampled_df.columns):
+            storage_price_df = sampled_df[["storage_gb", "price"]].dropna()
+            if not storage_price_df.empty:
+                storage_price_chart = (
+                    alt.Chart(storage_price_df)
+                    .mark_circle(size=70, color="#db2777")
+                    .encode(
+                        x=alt.X("storage_gb:Q", title="Storage (GB)"),
+                        y=alt.Y("price:Q", title="Price"),
+                        tooltip=["storage_gb", "price"],
+                    )
+                    .properties(height=320, title="Storage vs Price")
+                )
+                st.altair_chart(storage_price_chart, use_container_width=True)
+                chart_rendered = True
+
+        if "brand" in sampled_df.columns:
+            brand_counts = (
+                sampled_df["brand"]
+                .dropna()
+                .astype(str)
+                .value_counts()
+                .head(10)
+                .rename_axis("brand")
+                .reset_index(name="count")
+            )
+            if not brand_counts.empty:
+                brand_chart = (
+                    alt.Chart(brand_counts)
+                    .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#f59e0b")
+                    .encode(
+                        x=alt.X("count:Q", title="Product Count"),
+                        y=alt.Y("brand:N", title="Brand", sort="-x"),
+                    )
+                    .properties(height=320, title="Top Brand Frequency")
+                )
+                st.altair_chart(brand_chart, use_container_width=True)
+                chart_rendered = True
+
+        if sample_note:
+            st.caption(sample_note)
+        if not chart_rendered:
+            st.info("Skipped e-commerce visualizations because the parsed numeric product fields were not available yet.")
+
+
 def _render_data_type_distribution(profile: dict) -> None:
     """Show the distribution of major data types detected in the dataset."""
     with st.expander("Data Type Distribution", expanded=False):
@@ -625,6 +738,10 @@ def render_dataset_visualizations(
     target_column: str | None,
 ) -> None:
     """Render safe pre-cleaning dataset visualizations inside expanders."""
+    visualization_df = dataframe
+    if detect_mobile_ecommerce_dataset(dataframe.columns):
+        visualization_df, _ = build_ecommerce_preprocessed_view(dataframe)
+
     st.subheader("Dataset Visualizations")
     st.caption("Use these charts to inspect quality issues before applying any cleaning step.")
     _render_visualization_metric_cards(dataframe, profile)
@@ -632,9 +749,10 @@ def render_dataset_visualizations(
     _render_missing_values_chart(dataframe)
     _render_data_type_distribution(profile)
     _render_target_distribution_chart(dataframe, target_column)
-    _render_numeric_boxplot(dataframe)
-    _render_correlation_heatmap(dataframe)
-    _render_outlier_visualizations(dataframe)
+    _render_numeric_boxplot(visualization_df)
+    _render_correlation_heatmap(visualization_df)
+    _render_outlier_visualizations(visualization_df)
+    _render_ecommerce_visualizations(dataframe)
     _render_nlp_visualizations(
         dataframe,
         profile.get("text_columns", []),
@@ -657,12 +775,22 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         column for column, count in profile["missing_values"].items() if count > 0
     ]
     st.write(f"Columns with missing values: {columns_with_missing_values}")
+    if profile.get("reference_columns"):
+        st.write(f"Reference/URL columns: {profile['reference_columns']}")
+    if detect_mobile_ecommerce_dataset(profile.get("column_names", [])):
+        st.info(
+            "This dataset looks like a mobile-product catalog. The app will keep Python responsible for preprocessing and treat the result as future recommendation or ranking readiness unless you explicitly select a target."
+        )
 
     st.subheader("5. Recommended ML Algorithm")
     st.success(f"Recommended problem type: {ml_recommendation['recommended_problem_type']}")
     st.write(f"Reason: {ml_recommendation['reason']}")
     st.write(f"Target Column Used For Inference: {ml_recommendation['target_column_used_for_inference']}")
     st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
+    if ml_recommendation.get("recommendation_ready"):
+        st.info(
+            "The current stage prepares the product data for future recommendation or ranking workflows. No recommendation model is trained yet."
+        )
 
     algorithm_recommendation = ml_recommendation.get("algorithm_recommendation", {})
     beginner_choice = algorithm_recommendation.get("beginner_friendly_first_choice")
@@ -696,6 +824,7 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.write(f"Boolean Columns: {ml_recommendation['boolean_columns']}")
         st.write(f"Datetime Columns: {ml_recommendation['datetime_columns']}")
         st.write(f"ID-like Columns: {ml_recommendation['id_like_columns']}")
+        st.write(f"Recommendation Ready: {ml_recommendation.get('recommendation_ready', False)}")
         st.write("Top target suggestions:", ml_recommendation["target_detection_metadata"].get("top_suggestions", []))
 
 
@@ -935,6 +1064,16 @@ def render_cleaning_results(
     st.write(f"Encoded source columns: {cleaning_summary.get('encoded_columns', [])}")
     st.write(f"Scaled numeric columns: {cleaning_summary.get('scaled_columns', [])}")
     st.write(f"Cleaned text columns: {cleaning_summary.get('cleaned_text_columns', [])}")
+    if cleaning_summary.get("ecommerce_preprocessing_applied"):
+        st.write(
+            f"Extracted numeric feature columns: {cleaning_summary.get('extracted_feature_columns', [])}"
+        )
+        st.write(
+            f"Dropped reference columns: {cleaning_summary.get('dropped_reference_columns', [])}"
+        )
+        st.write(
+            f"Normalized categorical columns: {cleaning_summary.get('normalized_categorical_columns', [])}"
+        )
 
     st.subheader("Cleaning Impact Summary")
     comparison_columns = st.columns(4)
@@ -1009,6 +1148,10 @@ def render_cleaning_results(
     if cleaning_summary.get("cleaned_text_columns"):
         st.info(
             "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
+        )
+    if cleaning_summary.get("recommendation_ready"):
+        st.info(
+            "The cleaned dataset is more suitable for future product recommendation or ranking workflows, but no model has been trained in this stage."
         )
 
     if not cleaning_summary["options_used"]["handle_missing_values"]:

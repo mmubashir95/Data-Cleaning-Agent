@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+from utils.ecommerce_preprocessing import (
+    E_COMMERCE_NUMERIC_COLUMN_HINTS,
+    detect_mobile_ecommerce_dataset,
+    get_reference_columns,
+    normalize_column_name,
+)
 
 
 def validate_dataset(
@@ -84,5 +90,18 @@ def validate_dataset(
                 warnings.append(
                     f"Column '{column}' has very high cardinality and may need special handling."
                 )
+
+    if detect_mobile_ecommerce_dataset(df.columns):
+        for column in df.columns:
+            normalized_name = normalize_column_name(column)
+            if normalized_name in E_COMMERCE_NUMERIC_COLUMN_HINTS and not pd.api.types.is_numeric_dtype(df[column]):
+                warnings.append(
+                    f"Column '{column}' looks like scraped numeric text and may need domain-specific conversion."
+                )
+
+        for column in get_reference_columns(df.columns):
+            warnings.append(
+                f"Column '{column}' looks like a reference or URL field and should usually be excluded from ML features."
+            )
 
     return {"is_valid": len(errors) == 0, "errors": errors, "warnings": warnings}

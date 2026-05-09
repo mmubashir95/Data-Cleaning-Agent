@@ -30,7 +30,8 @@ FLOWISE_UNAVAILABLE_MESSAGE = (
 FLOWISE_PROFILE_NOTE = (
     "This AI explanation is based on a Python-generated dataset profile, cleaning report, "
     "and small preview only. The full raw dataset was not sent to the AI model. Do not "
-    "invent exact statistics that are not present in the provided profile."
+    "invent exact statistics that are not present in the provided profile. Python performs "
+    "the real cleaning and preprocessing; Flowise only explains the generated summary."
 )
 FLOWISE_RESPONSE_PREFIX = (
     "This explanation is based on the Python-generated dataset profile and cleaning report, "
@@ -226,6 +227,20 @@ def build_flowise_profile_object(
                 for algorithm in ml_recommendation.get("algorithms", [])
             ]
         ),
+        "recommendation_ready": bool(
+            cleaning_report.get("recommendation_ready")
+            or ml_recommendation.get("recommendation_ready", False)
+        ),
+        "ecommerce_preprocessing_applied": bool(
+            cleaning_report.get("ecommerce_preprocessing_applied", False)
+        ),
+        "dropped_reference_columns": _to_json_safe(
+            cleaning_report.get("dropped_reference_columns", [])
+        ),
+        "ai_limitations": (
+            "The dataset may support future recommendation or ranking systems after preprocessing, "
+            "but no recommendation model has been trained in this stage."
+        ),
         "pandas_numpy_usage": _to_json_safe(pandas_numpy_usage),
         "preview_rows_sent": len(sample_rows),
         "full_dataset_sent_to_flowise": False,
@@ -319,7 +334,8 @@ def build_flowise_combined_question(question: str, profile_text: str | None = No
         f"{cleaned_question}\n\n"
         "Python-generated dataset profile:\n"
         f"{profile_text}\n\n"
-        "Important: Use this profile as the dataset source. The full raw CSV was not sent."
+        "Important: Use this profile as the dataset source. The full raw CSV was not sent. "
+        "If the dataset looks recommendation-ready, explain readiness only and do not claim a trained model exists."
     )
     return instruction_block
 

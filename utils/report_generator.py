@@ -64,6 +64,11 @@ def generate_cleaning_report(
     encoded_columns = cleaning_summary.get("encoded_columns", [])
     scaled_columns = cleaning_summary.get("scaled_columns", [])
     cleaned_text_columns = cleaning_summary.get("cleaned_text_columns", [])
+    ecommerce_preprocessing_applied = cleaning_summary.get("ecommerce_preprocessing_applied", False)
+    cleaned_numeric_columns = cleaning_summary.get("cleaned_numeric_columns", [])
+    extracted_feature_columns = cleaning_summary.get("extracted_feature_columns", [])
+    normalized_categorical_columns = cleaning_summary.get("normalized_categorical_columns", [])
+    dropped_reference_columns = cleaning_summary.get("dropped_reference_columns", [])
     pandas_numpy_usage = build_pandas_numpy_usage(
         original_file_name=original_file_name,
         profile=profile,
@@ -148,6 +153,7 @@ def generate_cleaning_report(
         "datetime_columns_detected": profile.get("datetime_columns", []),
         "boolean_columns_detected": profile.get("boolean_columns", []),
         "id_like_columns_detected": profile.get("id_like_columns", []),
+        "reference_columns_detected": profile.get("reference_columns", []),
         "validation_errors": validation_result.get("errors", []),
         "validation_warnings": validation_result.get("warnings", []),
         "columns_encoded": encoded_columns,
@@ -158,6 +164,13 @@ def generate_cleaning_report(
         "scaler_used": cleaning_summary.get("scaler_used"),
         "outlier_handling_summary": outlier_summary,
         "target_encoding_recommendation": cleaning_summary.get("target_encoding_recommendation"),
+        "ecommerce_preprocessing_applied": ecommerce_preprocessing_applied,
+        "cleaned_numeric_columns": cleaned_numeric_columns,
+        "extracted_feature_columns": extracted_feature_columns,
+        "normalized_categorical_columns": normalized_categorical_columns,
+        "dropped_reference_columns": dropped_reference_columns,
+        "recommendation_ready": cleaning_summary.get("recommendation_ready", False)
+        or ml_recommendation.get("recommendation_ready", False),
         "options_used": options_used,
         "cleaning_actions": cleaning_actions,
         "nlp_cleaning_summary": {
