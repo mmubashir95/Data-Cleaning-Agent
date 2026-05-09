@@ -13,6 +13,8 @@ import pandas as pd
 import streamlit as st
 
 from src.ai.flowise_client import (
+    FLOWISE_PROFILE_NOTE,
+    build_default_flowise_metadata,
     build_flowise_file_preview,
     query_flowise_agent,
 )
@@ -24,11 +26,14 @@ from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report, make_safe_stem
 
 FLOWISE_CONTEXT_INSTRUCTION = (
-    "Important: the file field contains a compact text preview of the dataset "
-    "produced by the Python app, not the raw CSV or Excel file. Do not ask "
-    "for the dataset again. Do not request the full file. Use the provided "
-    "preview directly to answer. If something is missing, make a reasonable "
-    "inference and clearly label it as an inference."
+    "Important: the file field contains a compact Python-generated dataset profile, "
+    "cleaning report, and small preview only. Do not ask for the dataset again. "
+    "Do not request the full file. Use only the provided profile and preview to answer. "
+    "If something is missing, make a reasonable inference and clearly label it as an inference. "
+    "Your explanation must clearly cover the dataset type, problem type, key data quality issues, "
+    "cleaning actions performed, skipped actions and why, the recommended algorithm and reason, "
+    "and the limitation that the answer is based on the profile and preview only.\n\n"
+    f"{FLOWISE_PROFILE_NOTE}"
 )
 
 PROMPT_TEMPLATES = {
@@ -407,16 +412,14 @@ def build_flowise_prompt(
             f"{FLOWISE_CONTEXT_INSTRUCTION}\n\n"
             "User Custom Question:\n"
             f"{cleaned_custom_prompt}\n\n"
-            "Dataset Summary:\n"
-            f"{dataset_summary}"
+            "Use the attached Python-generated dataset profile in the file/context field."
         )
 
     selected_template = PROMPT_TEMPLATES[selected_prompt_type]
     return (
         f"{FLOWISE_CONTEXT_INSTRUCTION}\n\n"
         f"{selected_template}\n\n"
-        "Dataset Summary:\n"
-        f"{dataset_summary}"
+        "Use the attached Python-generated dataset profile in the file/context field."
     )
 
 
@@ -436,6 +439,7 @@ def render_flowise_explanation_section(
     dataset_state_key = f"{key_prefix}_flowise_dataset_identity"
     answer_state_key = "last_flowise_answer"
     raw_response_state_key = "last_flowise_raw_response"
+    metadata_state_key = f"{key_prefix}_flowise_metadata"
 
     # Clear stale Flowise output when the active dataset changes so a previous
     # explanation is not shown for a different upload.
@@ -443,6 +447,10 @@ def render_flowise_explanation_section(
         st.session_state[dataset_state_key] = dataset_identity
         st.session_state.pop(answer_state_key, None)
         st.session_state.pop(raw_response_state_key, None)
+        st.session_state[metadata_state_key] = build_default_flowise_metadata()
+
+    if metadata_state_key not in st.session_state:
+        st.session_state[metadata_state_key] = build_default_flowise_metadata()
 
     selected_prompt = st.selectbox(
         "Choose AI Prompt Type",
@@ -507,6 +515,11 @@ def render_flowise_explanation_section(
         # to provide the Python-generated profiling, cleaning summary, and downloads.
         with st.spinner("Asking Flowise Agent..."):
             result = query_flowise_agent(outbound_question, file_summary=file_preview)
+
+        st.session_state[metadata_state_key] = result.get(
+            "metadata",
+            build_default_flowise_metadata(),
+        )
 
         if not result["success"]:
             st.error(result["error"])
@@ -775,6 +788,10 @@ def render_uploaded_dataset(
                 ml_recommendation,
                 uploaded_file.name,
                 cleaned_file_path=cleaned_csv_path,
+                flowise_metadata=st.session_state.get(
+                    "profile_flowise_metadata",
+                    build_default_flowise_metadata(),
+                ),
             )
         except Exception as exc:
             st.error(f"Cleaning could not be completed safely. Details: {exc}")

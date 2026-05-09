@@ -86,11 +86,13 @@ class TestCleaningReportActions(unittest.TestCase):
             "Logistic Regression",
         )
         self.assertIn("pandas_numpy_usage", report)
+        self.assertIn("flowise_integration", report)
         numpy_functions = {
             entry["function"] for entry in report["pandas_numpy_usage"]["numpy_functions"]
         }
         self.assertIn("np.mean()", numpy_functions)
         self.assertIn("np.std()", numpy_functions)
+        self.assertEqual(report["flowise_integration"]["flowise_status"], "skipped")
         self.assertEqual(len(cleaned_df), len(dataframe))
 
     def test_report_includes_only_relevant_pandas_numpy_usage_for_performed_actions(self):

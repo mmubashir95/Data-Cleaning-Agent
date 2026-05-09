@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -10,12 +12,23 @@ import requests
 
 from utils.library_usage import build_pandas_numpy_usage
 
+logger = logging.getLogger(__name__)
+
 FLOWISE_PREDICTION_URL = (
     "https://cloud.flowiseai.com/api/v1/prediction/"
     "6a7b5277-b4bf-4a79-a785-8cde06dbf860"
 )
 FLOWISE_UNAVAILABLE_MESSAGE = (
     "Flowise Agent is currently unavailable. The Python cleaning report is still available."
+)
+FLOWISE_PROFILE_NOTE = (
+    "This AI explanation is based on a Python-generated dataset profile, cleaning report, "
+    "and small preview only. The full raw dataset was not sent to the AI model. Do not "
+    "invent exact statistics that are not present in the provided profile."
+)
+FLOWISE_RESPONSE_PREFIX = (
+    "This explanation is based on the Python-generated dataset profile and cleaning report, "
+    "not the full raw dataset."
 )
 
 
@@ -46,8 +59,153 @@ def extract_flowise_answer(response_json: dict) -> str:
     for key in ("text", "answer", "result", "output", "response"):
         value = response_json.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
-    return json.dumps(response_json, indent=2, default=str)
+            answer = value.strip()
+            if FLOWISE_RESPONSE_PREFIX not in answer:
+                return f"{FLOWISE_RESPONSE_PREFIX}\n\n{answer}"
+            return answer
+    fallback_answer = json.dumps(response_json, indent=2, default=str)
+    return f"{FLOWISE_RESPONSE_PREFIX}\n\n{fallback_answer}"
+
+
+def build_default_flowise_metadata() -> dict[str, Any]:
+    """Return a default metadata block for report output before any AI call happens."""
+    return {
+        "flowise_called": False,
+        "full_dataset_sent_to_flowise": False,
+        "preview_rows_sent": 0,
+        "flowise_status": "skipped",
+        "flowise_error_message": None,
+    }
+
+
+def _truncate_text_value(value: Any, max_length: int = 120) -> Any:
+    """Trim long text values so Flowise receives a compact preview."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+
+    text = str(value)
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+
+def _truncate_sample_rows(
+    dataframe: pd.DataFrame,
+    *,
+    max_rows: int,
+    max_columns: int = 25,
+    max_text_length: int = 120,
+) -> tuple[list[dict[str, Any]], list[str], int]:
+    """Build a token-safe sample row preview."""
+    preview_rows = max(1, min(max_rows, 10))
+    preview_columns = list(dataframe.columns[:max_columns])
+    preview_frame = dataframe.loc[:, preview_columns].head(preview_rows).copy()
+    preview_frame = preview_frame.where(pd.notna(preview_frame), None)
+
+    records: list[dict[str, Any]] = []
+    for record in preview_frame.to_dict(orient="records"):
+        records.append(
+            {
+                str(column): _truncate_text_value(value, max_length=max_text_length)
+                for column, value in record.items()
+            }
+        )
+
+    return records, preview_columns, max(0, len(dataframe.columns) - len(preview_columns))
+
+
+def build_flowise_profile_object(
+    dataframe: pd.DataFrame,
+    profile: dict[str, Any],
+    ml_recommendation: dict[str, Any],
+    *,
+    target_column: str | None = None,
+    cleaning_report: dict[str, Any] | None = None,
+    file_name: str | None = None,
+    max_rows: int = 10,
+) -> dict[str, Any]:
+    """Build the compact structured profile object sent to Flowise."""
+    profile = profile or {}
+    ml_recommendation = ml_recommendation or {}
+    cleaning_report = cleaning_report or {}
+
+    original_file_name = file_name or "dataset.csv"
+    dataset_name = Path(original_file_name).stem or "dataset"
+    pandas_numpy_usage = cleaning_report.get("pandas_numpy_usage") or build_pandas_numpy_usage(
+        original_file_name=original_file_name,
+        profile=profile,
+        cleaning_summary={},
+    )
+    sample_rows, sample_row_columns, omitted_sample_columns = _truncate_sample_rows(
+        dataframe,
+        max_rows=max_rows,
+    )
+    missing_value_summary = {
+        str(column): int(count)
+        for column, count in (profile.get("missing_values", {}) or {}).items()
+        if int(count) > 0
+    }
+    cleaning_actions_performed = []
+    cleaning_actions = cleaning_report.get("cleaning_actions", {})
+    for action_name, details in cleaning_actions.items():
+        if details.get("performed"):
+            cleaning_actions_performed.append(
+                {
+                    "action": action_name,
+                    "summary": {
+                        key: value
+                        for key, value in details.items()
+                        if key in {"rows_removed", "columns_handled", "columns_encoded", "columns_scaled", "scaler_used"}
+                    },
+                }
+            )
+
+    skipped_cleaning_steps = cleaning_report.get("skipped_steps", [])
+
+    return {
+        "note": FLOWISE_PROFILE_NOTE,
+        "dataset_name": dataset_name,
+        "original_file_name": original_file_name,
+        "shape": {
+            "rows": int(profile.get("rows", len(dataframe))),
+            "columns": int(profile.get("columns", len(dataframe.columns))),
+        },
+        "rows": int(profile.get("rows", len(dataframe))),
+        "columns": int(profile.get("columns", len(dataframe.columns))),
+        "column_names": _to_json_safe(profile.get("column_names", list(dataframe.columns))),
+        "dtypes": _to_json_safe(profile.get("data_types", dataframe.dtypes.astype(str).to_dict())),
+        "numeric_columns": _to_json_safe(profile.get("numeric_columns", [])),
+        "categorical_columns": _to_json_safe(profile.get("categorical_columns", [])),
+        "text_columns": _to_json_safe(profile.get("text_columns", [])),
+        "datetime_columns": _to_json_safe(profile.get("datetime_columns", [])),
+        "missing_value_summary": _to_json_safe(missing_value_summary),
+        "total_missing_values": int(sum((profile.get("missing_values", {}) or {}).values())),
+        "duplicate_count": int(profile.get("duplicate_rows", int(dataframe.duplicated().sum()))),
+        "sample_rows": _to_json_safe(sample_rows),
+        "sample_row_columns_included": sample_row_columns,
+        "sample_row_omitted_column_count": omitted_sample_columns,
+        "cleaning_actions_performed": _to_json_safe(cleaning_actions_performed),
+        "skipped_cleaning_steps": _to_json_safe(skipped_cleaning_steps),
+        "before_vs_after_summary": _to_json_safe(
+            cleaning_report.get("before_vs_after_summary", {})
+        ),
+        "problem_type": ml_recommendation.get("recommended_problem_type"),
+        "problem_type_reason": ml_recommendation.get("problem_type_reason"),
+        "selected_target_column": ml_recommendation.get("selected_target_column", target_column),
+        "suggested_target_column": ml_recommendation.get("suggested_target_column"),
+        "recommended_algorithms": _to_json_safe(
+            [
+                {
+                    "name": algorithm.get("name"),
+                    "reason": algorithm.get("reason"),
+                }
+                for algorithm in ml_recommendation.get("algorithms", [])
+            ]
+        ),
+        "pandas_numpy_usage": _to_json_safe(pandas_numpy_usage),
+        "preview_rows_sent": len(sample_rows),
+        "full_dataset_sent_to_flowise": False,
+    }
 
 
 def build_flowise_dataset_summary(
@@ -56,78 +214,18 @@ def build_flowise_dataset_summary(
     ml_recommendation,
     target_column=None,
     cleaning_report=None,
+    file_name: str | None = None,
 ) -> str:
-    """Build a compact JSON summary for Flowise instead of sending full datasets.
-
-    This protects the explanation layer from unnecessary token growth and helps
-    avoid Flowise/OpenAI token overflow by sending only the most relevant,
-    high-signal dataset summary and at most the first 5 rows.
-    """
-    profile = profile or {}
-    ml_recommendation = ml_recommendation or {}
-    pandas_numpy_usage = (
-        cleaning_report.get("pandas_numpy_usage", {})
-        if cleaning_report is not None
-        else build_pandas_numpy_usage(
-            original_file_name="dataset.csv",
-            profile=profile,
-            cleaning_summary={},
-        )
+    """Build the compact structured summary string sent to Flowise."""
+    summary = build_flowise_profile_object(
+        dataframe,
+        profile or {},
+        ml_recommendation or {},
+        target_column=target_column,
+        cleaning_report=cleaning_report,
+        file_name=file_name,
+        max_rows=10,
     )
-    summary = {
-        "dataset_shape": {
-            "rows": int(len(dataframe)),
-            "columns": int(len(dataframe.columns)),
-        },
-        "column_names": _to_json_safe(profile.get("column_names", list(dataframe.columns))),
-        "target_column": _to_json_safe(target_column if target_column is not None else profile.get("target_column")),
-        "data_types": _to_json_safe(profile.get("data_types", {})),
-        "missing_values": _to_json_safe(profile.get("missing_values", {})),
-        "duplicate_rows": int(profile.get("duplicate_rows", int(dataframe.duplicated().sum()))),
-        "numeric_columns": _to_json_safe(profile.get("numeric_columns", [])),
-        "categorical_columns": _to_json_safe(profile.get("categorical_columns", [])),
-        "text_columns": _to_json_safe(profile.get("text_columns", [])),
-        "datetime_columns": _to_json_safe(profile.get("datetime_columns", [])),
-        "boolean_columns": _to_json_safe(profile.get("boolean_columns", [])),
-        "id_like_columns": _to_json_safe(profile.get("id_like_columns", [])),
-        "recommended_problem_type": _to_json_safe(
-            ml_recommendation.get("recommended_problem_type")
-        ),
-        "algorithm_recommendation": _to_json_safe(
-            ml_recommendation.get("algorithm_recommendation", {})
-        ),
-        "pandas_numpy_usage": _to_json_safe(pandas_numpy_usage),
-        "recommended_algorithms": _to_json_safe(
-            [
-                algorithm.get("name", str(algorithm))
-                for algorithm in ml_recommendation.get("algorithms", [])
-            ]
-        ),
-        "first_5_rows": _to_json_safe(dataframe.head(5).to_dict(orient="records")),
-    }
-
-    if cleaning_report is not None:
-        summary["cleaning_report"] = _to_json_safe(
-            {
-                "final_rows": cleaning_report.get("final_rows"),
-                "final_columns": cleaning_report.get("final_columns"),
-                "duplicate_rows_removed": cleaning_report.get("duplicate_rows_removed"),
-                "missing_values_after_cleaning": cleaning_report.get(
-                    "missing_values_after_cleaning", {}
-                ),
-                "columns_encoded": cleaning_report.get("columns_encoded", []),
-                "columns_scaled": cleaning_report.get("columns_scaled", []),
-                "recommended_ml_problem_type": cleaning_report.get(
-                    "recommended_ml_problem_type"
-                ),
-                "algorithm_recommendation": cleaning_report.get(
-                    "algorithm_recommendation", {}
-                ),
-                "cleaning_steps": cleaning_report.get("cleaning_steps", []),
-                "skipped_steps": cleaning_report.get("skipped_steps", []),
-            }
-        )
-
     return json.dumps(_to_json_safe(summary), indent=2, default=str)
 
 
@@ -141,154 +239,19 @@ def build_flowise_file_preview(
     file_name: str | None = None,
     max_rows: int = 10,
 ) -> str:
-    """Build a compact text preview for Flowise from a Python-read dataset.
-
-    Python reads and summarizes the uploaded dataset first. Flowise is used only
-    as an AI explanation layer, so the full dataset is never sent. This keeps
-    prompts smaller and helps avoid token overflow on large files.
-    """
+    """Build a compact profile preview for Flowise without sending raw CSV data."""
     if df is None:
         raise ValueError("No dataset is available to summarize for the AI agent.")
     if df.empty:
         raise ValueError("The uploaded dataset is empty, so no AI preview can be created.")
-
-    profile = profile or {}
-    ml_recommendation = ml_recommendation or {}
-    pandas_numpy_usage = (
-        cleaning_report.get("pandas_numpy_usage", {})
-        if cleaning_report is not None
-        else build_pandas_numpy_usage(
-            original_file_name=file_name or "dataset.csv",
-            profile=profile,
-            cleaning_summary={},
-        )
+    return build_flowise_dataset_summary(
+        df,
+        profile or {},
+        ml_recommendation or {},
+        target_column=target_column,
+        file_name=file_name,
+        cleaning_report=cleaning_report,
     )
-    preview_rows = max(1, min(max_rows, 10))
-
-    # Flowise appears to respond better to raw-looking tabular text than to
-    # heavily structured JSON-like payloads. We therefore send a compact TSV
-    # preview that resembles the manual copy/paste content, while still capping
-    # it to a small number of rows to avoid token overflow.
-    sample_rows = df.head(preview_rows).copy()
-    sample_rows = sample_rows.fillna("")
-    sample_rows_text = sample_rows.to_csv(sep="\t", index=False).strip()
-
-    numeric_columns = profile.get("numeric_columns")
-    if numeric_columns is None:
-        numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
-
-    categorical_columns = profile.get("categorical_columns", [])
-    text_columns = profile.get("text_columns", [])
-    datetime_columns = profile.get("datetime_columns", [])
-    boolean_columns = profile.get("boolean_columns", [])
-    id_like_columns = profile.get("id_like_columns", [])
-
-    preview_sections = [
-        "Dataset Preview For AI Agent",
-        f"File Name: {file_name or 'Unknown'}",
-        f"Dataset Shape: {len(df)} rows x {len(df.columns)} columns",
-        f"Column Names: {list(profile.get('column_names', list(df.columns)))}",
-        f"Target Column: {target_column if target_column is not None else 'None'}",
-        f"Data Types: {_to_json_safe(profile.get('data_types', df.dtypes.astype(str).to_dict()))}",
-        f"Missing Values Summary: {_to_json_safe(profile.get('missing_values', df.isna().sum().to_dict()))}",
-        f"Duplicate Row Count: {int(profile.get('duplicate_rows', int(df.duplicated().sum())))}",
-        f"Numeric Columns: {_to_json_safe(numeric_columns)}",
-        f"Categorical Columns: {_to_json_safe(categorical_columns)}",
-        f"Text/Object Columns: {_to_json_safe(text_columns)}",
-        f"Datetime Columns: {_to_json_safe(datetime_columns)}",
-        f"Boolean Columns: {_to_json_safe(boolean_columns)}",
-        f"ID-like Columns: {_to_json_safe(id_like_columns)}",
-    ]
-
-    if ml_recommendation:
-        preview_sections.append(
-            "Recommended Problem Type: "
-            f"{ml_recommendation.get('recommended_problem_type', 'Unknown')}"
-        )
-        preview_sections.append(
-            "Recommended Algorithms: "
-            + ", ".join(
-                algorithm.get("name", str(algorithm))
-                for algorithm in ml_recommendation.get("algorithms", [])
-            )
-        )
-        algorithm_recommendation = ml_recommendation.get("algorithm_recommendation", {})
-        first_choice = algorithm_recommendation.get("beginner_friendly_first_choice", {})
-        if first_choice:
-            preview_sections.append(
-                "Beginner-Friendly First Choice: "
-                f"{first_choice.get('name', 'Unknown')}"
-            )
-            preview_sections.append(
-                "Why It Fits: "
-                f"{first_choice.get('reason', 'No reason provided.')}"
-            )
-        if algorithm_recommendation.get("target_variable_type"):
-            preview_sections.append(
-                "Target Variable Type: "
-                f"{algorithm_recommendation['target_variable_type']}"
-            )
-        preview_sections.append(
-            "Pandas and NumPy Usage: "
-            f"{pandas_numpy_usage.get('summary', 'No usage summary available.')}"
-        )
-        pandas_function_names = [
-            entry.get("function", "")
-            for entry in pandas_numpy_usage.get("pandas_functions", [])
-            if entry.get("function")
-        ]
-        if pandas_function_names:
-            preview_sections.append(
-                "Relevant Pandas Functions: " + ", ".join(pandas_function_names)
-            )
-        numpy_function_names = [
-            entry.get("function", "")
-            for entry in pandas_numpy_usage.get("numpy_functions", [])
-            if entry.get("function")
-        ]
-        if numpy_function_names:
-            preview_sections.append(
-                "Relevant NumPy Functions: " + ", ".join(numpy_function_names)
-            )
-
-    preview_sections.extend(
-        [
-            "Dataset Content Preview (tab-separated):",
-            sample_rows_text,
-        ]
-    )
-
-    if cleaning_report is not None:
-        preview_sections.extend(
-            [
-                "Cleaning Summary:",
-                json.dumps(
-                    _to_json_safe(
-                        {
-                            "final_rows": cleaning_report.get("final_rows"),
-                            "final_columns": cleaning_report.get("final_columns"),
-                            "duplicate_rows_removed": cleaning_report.get(
-                                "duplicate_rows_removed"
-                            ),
-                            "columns_encoded": cleaning_report.get("columns_encoded", []),
-                            "columns_scaled": cleaning_report.get("columns_scaled", []),
-                            "algorithm_recommendation": cleaning_report.get(
-                                "algorithm_recommendation", {}
-                            ),
-                            "pandas_numpy_usage": cleaning_report.get(
-                                "pandas_numpy_usage", {}
-                            ),
-                            "cleaning_steps": cleaning_report.get("cleaning_steps", []),
-                            "skipped_steps": cleaning_report.get("skipped_steps", []),
-                        }
-                    ),
-                    indent=2,
-                    default=str,
-                ),
-            ]
-        )
-
-    return "\n\n".join(str(section) for section in preview_sections if section is not None)
 
 
 def build_flowise_combined_question(question: str, file_preview: str | None = None) -> str:
@@ -304,11 +267,9 @@ def build_flowise_combined_question(question: str, file_preview: str | None = No
         return cleaned_question
 
     instruction_block = (
-        "Use the dataset preview below to answer the question. "
+        "Use the attached Python-generated dataset profile to answer the question. "
         "Do not ask the user to paste the dataset again. "
         "Do not request the full CSV or Excel file.\n\n"
-        "Dataset preview:\n"
-        f"{file_preview}\n\n"
         "User question:\n"
     )
     return instruction_block + cleaned_question
@@ -325,46 +286,107 @@ def query_flowise_agent(question: str, file_summary: str | None = None) -> dict:
         "question": question,
         "file": file_summary,
     }
+    preview_rows_sent = 0
+    if file_summary:
+        try:
+            preview_rows_sent = len(json.loads(file_summary).get("sample_rows", []))
+        except Exception:
+            preview_rows_sent = 0
 
     try:
         response = requests.post(FLOWISE_PREDICTION_URL, json=payload, timeout=60)
     except requests.Timeout:
+        logger.warning("Flowise request timed out.")
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
+            "metadata": {
+                "flowise_called": True,
+                "full_dataset_sent_to_flowise": False,
+                "preview_rows_sent": preview_rows_sent,
+                "flowise_status": "error",
+                "flowise_error_message": "Request timed out.",
+            },
         }
     except requests.ConnectionError:
+        logger.warning("Flowise connection error.")
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
+            "metadata": {
+                "flowise_called": True,
+                "full_dataset_sent_to_flowise": False,
+                "preview_rows_sent": preview_rows_sent,
+                "flowise_status": "error",
+                "flowise_error_message": "Connection failed.",
+            },
         }
     except requests.RequestException as exc:
+        logger.warning("Flowise request error: %s", exc.__class__.__name__)
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
+            "metadata": {
+                "flowise_called": True,
+                "full_dataset_sent_to_flowise": False,
+                "preview_rows_sent": preview_rows_sent,
+                "flowise_status": "error",
+                "flowise_error_message": str(exc),
+            },
         }
-    except Exception:
+    except Exception as exc:
+        logger.exception("Unexpected Flowise request failure.")
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
+            "metadata": {
+                "flowise_called": True,
+                "full_dataset_sent_to_flowise": False,
+                "preview_rows_sent": preview_rows_sent,
+                "flowise_status": "error",
+                "flowise_error_message": str(exc),
+            },
         }
 
     if response.status_code != 200:
+        logger.warning("Flowise returned non-200 status: %s", response.status_code)
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
+            "metadata": {
+                "flowise_called": True,
+                "full_dataset_sent_to_flowise": False,
+                "preview_rows_sent": preview_rows_sent,
+                "flowise_status": "error",
+                "flowise_error_message": f"HTTP {response.status_code}",
+            },
         }
 
     try:
         response_json = response.json()
     except ValueError:
+        logger.warning("Flowise returned invalid JSON.")
         return {
             "success": False,
             "error": FLOWISE_UNAVAILABLE_MESSAGE,
+            "metadata": {
+                "flowise_called": True,
+                "full_dataset_sent_to_flowise": False,
+                "preview_rows_sent": preview_rows_sent,
+                "flowise_status": "error",
+                "flowise_error_message": "Invalid JSON response.",
+            },
         }
 
     return {
         "success": True,
         "answer": extract_flowise_answer(response_json),
         "raw_response": response_json,
+        "metadata": {
+            "flowise_called": True,
+            "full_dataset_sent_to_flowise": False,
+            "preview_rows_sent": preview_rows_sent,
+            "flowise_status": "success",
+            "flowise_error_message": None,
+        },
     }

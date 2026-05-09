@@ -239,6 +239,8 @@ class TestFullDatasetWorkflows(unittest.TestCase):
             report["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
             "Naive Bayes",
         )
+        self.assertEqual(report["flowise_integration"]["flowise_called"], False)
+        self.assertFalse(report["flowise_integration"]["full_dataset_sent_to_flowise"])
         self.assertIn("output_files", report)
         self.assertTrue(Path(report_path).exists())
         self.assertTrue(cleaned_df["label"].equals(df["label"]))

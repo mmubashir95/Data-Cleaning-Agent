@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.library_usage import build_pandas_numpy_usage
+from src.ai.flowise_client import build_default_flowise_metadata
 
 
 def _make_json_serializable(value: Any) -> Any:
@@ -41,6 +42,7 @@ def generate_cleaning_report(
     ml_recommendation: dict[str, Any],
     original_file_name: str,
     cleaned_file_path: str | Path | None = None,
+    flowise_metadata: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Build and save a single JSON cleaning report for the current workflow."""
     report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
@@ -57,6 +59,7 @@ def generate_cleaning_report(
         profile=profile,
         cleaning_summary=cleaning_summary,
     )
+    flowise_metadata = flowise_metadata or build_default_flowise_metadata()
 
     cleaning_actions = {
         "duplicates_removed": {
@@ -160,6 +163,7 @@ def generate_cleaning_report(
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
         "algorithm_recommendation": ml_recommendation.get("algorithm_recommendation", {}),
         "pandas_numpy_usage": pandas_numpy_usage,
+        "flowise_integration": flowise_metadata,
         "before_vs_after_summary": cleaning_summary.get("before_vs_after_summary", {}),
         "cleaning_steps": cleaning_summary.get("cleaning_steps", []),
         "skipped_steps": cleaning_summary.get("skipped_steps", []),

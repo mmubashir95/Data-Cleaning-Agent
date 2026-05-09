@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import unittest
 from unittest.mock import patch
 
@@ -94,12 +95,17 @@ class TestFlowisePromptUI(unittest.TestCase):
         self.assertTrue(mocked_query.called)
         sent_question = mocked_query.call_args.args[0]
         sent_preview = mocked_query.call_args.kwargs["file_summary"]
+        sent_preview_json = json.loads(sent_preview)
 
         self.assertIn("User Custom Question:", sent_question)
         self.assertIn("Explain why Random Forest is suitable for Titanic dataset", sent_question)
-        self.assertIn("Dataset Summary:", sent_question)
-        self.assertIn("PassengerId", sent_question)
-        self.assertIn("PassengerId", sent_preview)
+        self.assertIn("Use the attached Python-generated dataset profile in the file/context field.", sent_question)
+        self.assertIn("This AI explanation is based on a Python-generated dataset profile, cleaning report, and small preview only.", sent_question)
+        self.assertNotIn("PassengerId", sent_question)
+        self.assertEqual(sent_preview_json["original_file_name"], "titanic.csv")
+        self.assertEqual(sent_preview_json["preview_rows_sent"], 5)
+        self.assertFalse(sent_preview_json["full_dataset_sent_to_flowise"])
+        self.assertIn("sample_rows", sent_preview_json)
         self.assertNotIn("Explain why Random Forest is suitable for Titanic dataset", sent_preview)
 
     def test_flowise_preview_includes_algorithm_recommendation_details(self):
@@ -108,11 +114,11 @@ class TestFlowisePromptUI(unittest.TestCase):
         text_values = [element.value for element in at.text]
         combined_text = " ".join(text_values)
 
-        self.assertIn("Recommended Algorithms: Logistic Regression, Decision Tree, Random Forest", combined_text)
-        self.assertIn("Beginner-Friendly First Choice: Logistic Regression", combined_text)
-        self.assertIn("Target Variable Type: Binary categorical target", combined_text)
-        self.assertIn("Pandas and NumPy Usage:", combined_text)
-        self.assertIn("Relevant Pandas Functions: read_csv(), head(), info(), isnull().sum(), duplicated().sum()", combined_text)
+        self.assertIn("Python-generated dataset profile", combined_text)
+        self.assertIn("\"recommended_algorithms\":", combined_text)
+        self.assertIn("\"name\": \"Logistic Regression\"", combined_text)
+        self.assertIn("\"pandas_numpy_usage\":", combined_text)
+        self.assertIn("\"full_dataset_sent_to_flowise\": false", combined_text)
 
 
 if __name__ == "__main__":
