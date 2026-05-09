@@ -89,6 +89,7 @@ def clean_dataset(
     original_rows = len(df)
     original_columns = len(df.columns)
     missing_values_before = df.isnull().sum().to_dict()
+    original_classification = classify_columns(df, target_column=target_column)
 
     def record_skipped_step(message: str) -> None:
         cleaning_steps.append(message)
@@ -398,6 +399,42 @@ def clean_dataset(
         cleaning_steps.append("Skipped numeric scaling.")
 
     missing_values_after = cleaned_df.isnull().sum().to_dict()
+    cleaned_classification = classify_columns(cleaned_df, target_column=target_column)
+
+    before_vs_after_summary = {
+        "metrics": [
+            {
+                "metric": "Row count",
+                "before": original_rows,
+                "after": len(cleaned_df),
+            },
+            {
+                "metric": "Column count",
+                "before": original_columns,
+                "after": len(cleaned_df.columns),
+            },
+            {
+                "metric": "Total missing values",
+                "before": int(sum(missing_values_before.values())),
+                "after": int(sum(missing_values_after.values())),
+            },
+            {
+                "metric": "Duplicate rows",
+                "before": int(df.duplicated().sum()),
+                "after": int(cleaned_df.duplicated().sum()),
+            },
+            {
+                "metric": "Categorical columns count",
+                "before": len(original_classification["categorical_columns"]),
+                "after": len(cleaned_classification["categorical_columns"]),
+            },
+            {
+                "metric": "Numeric columns count",
+                "before": len(original_classification["numeric_columns"]),
+                "after": len(cleaned_classification["numeric_columns"]),
+            },
+        ]
+    }
 
     cleaning_summary = {
         "original_rows": original_rows,
@@ -424,6 +461,7 @@ def clean_dataset(
         "nlp_before_after_examples": nlp_before_after_examples,
         "scaled_columns": scaled_columns,
         "scaler_used": scaler_used,
+        "before_vs_after_summary": before_vs_after_summary,
         "options_used": options.copy(),
         "cleaning_steps": cleaning_steps,
         "skipped_steps": skipped_steps,

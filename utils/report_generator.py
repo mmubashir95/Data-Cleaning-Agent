@@ -86,6 +86,7 @@ def generate_cleaning_report(
         },
         "recommended_ml_problem_type": ml_recommendation.get("recommended_problem_type"),
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
+        "before_vs_after_summary": cleaning_summary.get("before_vs_after_summary", {}),
         "cleaning_steps": cleaning_summary.get("cleaning_steps", []),
         "skipped_steps": cleaning_summary.get("skipped_steps", []),
         "output_files": {

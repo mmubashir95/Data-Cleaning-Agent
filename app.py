@@ -413,6 +413,11 @@ def render_cleaning_results(
         for skipped_step in cleaning_summary["skipped_steps"]:
             st.warning(skipped_step)
 
+    st.subheader("Before vs After Cleaning")
+    comparison_metrics = cleaning_summary.get("before_vs_after_summary", {}).get("metrics", [])
+    if comparison_metrics:
+        st.dataframe(comparison_metrics, width="stretch")
+
     with st.expander("View cleaned dataset preview"):
         st.dataframe(cleaned_df.head(), width="stretch")
 
