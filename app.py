@@ -182,6 +182,143 @@ def render_dataset_profile(profile: dict) -> None:
         st.info("No missing values were detected in this dataset.")
 
 
+def _render_missing_values_chart(dataframe: pd.DataFrame) -> None:
+    """Render a missing values bar chart or a friendly skip message."""
+    missing_counts = dataframe.isnull().sum()
+    missing_counts = missing_counts[missing_counts > 0].sort_values(ascending=False)
+
+    with st.expander("Missing Values Bar Chart"):
+        if missing_counts.empty:
+            st.info("Skipped missing values chart because no missing values were detected before cleaning.")
+            return
+
+        missing_chart_data = (
+            missing_counts.rename_axis("column")
+            .reset_index(name="missing_values")
+        )
+        st.bar_chart(
+            missing_chart_data.set_index("column")["missing_values"],
+        )
+        st.caption("This chart highlights which columns have the most missing values before cleaning.")
+
+
+def _render_target_distribution_chart(
+    dataframe: pd.DataFrame,
+    target_column: str | None,
+) -> None:
+    """Render a target/class distribution chart when it is meaningful."""
+    with st.expander("Target/Class Distribution Chart"):
+        if target_column is None:
+            st.info("Skipped target distribution chart because no target column was selected.")
+            return
+
+        target_series = dataframe[target_column]
+        unique_count = int(target_series.dropna().nunique())
+        if unique_count == 0:
+            st.info("Skipped target distribution chart because the selected target column has no usable values.")
+            return
+        if unique_count > 20:
+            st.info(
+                "Skipped target distribution chart because the selected target has too many unique values and behaves more like a continuous variable."
+            )
+            return
+
+        target_counts = (
+            target_series.fillna("Missing")
+            .astype(str)
+            .value_counts(dropna=False)
+            .rename_axis("target_value")
+            .reset_index(name="count")
+        )
+        st.bar_chart(
+            target_counts.set_index("target_value")["count"],
+        )
+        st.caption("This chart shows how the selected target or class values are distributed.")
+
+
+def _render_numeric_boxplot(dataframe: pd.DataFrame) -> None:
+    """Render a boxplot across numeric columns or a skip message."""
+    numeric_df = dataframe.select_dtypes(include=["number"])
+
+    with st.expander("Numeric Columns Boxplot"):
+        if numeric_df.empty:
+            st.info("Skipped numeric boxplot because this dataset has no numeric columns.")
+            return
+
+        numeric_long = numeric_df.melt(var_name="column", value_name="value").dropna()
+        if numeric_long.empty:
+            st.info("Skipped numeric boxplot because the numeric columns do not contain plottable values.")
+            return
+
+        st.vega_lite_chart(
+            numeric_long,
+            {
+                "mark": {"type": "boxplot", "extent": 1.5},
+                "encoding": {
+                    "x": {"field": "column", "type": "nominal", "title": "Numeric Column"},
+                    "y": {"field": "value", "type": "quantitative", "title": "Value"},
+                    "color": {"field": "column", "type": "nominal", "legend": None},
+                },
+            },
+        )
+        st.caption("Boxplots help spot spread, median values, and possible outliers in numeric columns.")
+
+
+def _render_correlation_heatmap(dataframe: pd.DataFrame) -> None:
+    """Render a numeric correlation heatmap or a skip message."""
+    numeric_df = dataframe.select_dtypes(include=["number"])
+
+    with st.expander("Correlation Heatmap"):
+        if numeric_df.shape[1] < 2:
+            st.info("Skipped correlation heatmap because at least two numeric columns are required.")
+            return
+
+        correlation_matrix = numeric_df.corr().fillna(0.0)
+        correlation_heatmap_data = (
+            correlation_matrix.rename_axis(index="column_a", columns="column_b")
+            .stack()
+            .reset_index(name="correlation")
+        )
+        if correlation_heatmap_data.empty:
+            st.info("Skipped correlation heatmap because no numeric correlation values were available.")
+            return
+
+        st.vega_lite_chart(
+            correlation_heatmap_data,
+            {
+                "mark": "rect",
+                "encoding": {
+                    "x": {"field": "column_a", "type": "nominal", "title": ""},
+                    "y": {"field": "column_b", "type": "nominal", "title": ""},
+                    "color": {
+                        "field": "correlation",
+                        "type": "quantitative",
+                        "scale": {"domain": [-1, 1], "scheme": "redblue"},
+                        "title": "Correlation",
+                    },
+                    "tooltip": [
+                        {"field": "column_a", "type": "nominal", "title": "Column A"},
+                        {"field": "column_b", "type": "nominal", "title": "Column B"},
+                        {"field": "correlation", "type": "quantitative", "format": ".2f"},
+                    ],
+                },
+            },
+        )
+        st.caption("The heatmap shows how strongly numeric columns move together.")
+
+
+def render_dataset_visualizations(
+    dataframe: pd.DataFrame,
+    target_column: str | None,
+) -> None:
+    """Render safe pre-cleaning dataset visualizations inside expanders."""
+    st.subheader("Dataset Visualizations")
+    _render_missing_values_chart(dataframe)
+    _render_target_distribution_chart(dataframe, target_column)
+    _render_numeric_boxplot(dataframe)
+    _render_correlation_heatmap(dataframe)
+
+
 def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     """Show a beginner-friendly data quality summary and ML recommendation."""
     st.subheader("4. Data Quality Report")
@@ -606,6 +743,7 @@ def render_uploaded_dataset(
     )
 
     render_dataset_profile(profile)
+    render_dataset_visualizations(dataframe, selected_target)
     render_data_quality_report(profile, ml_recommendation)
     render_cleaning_options_summary(cleaning_options)
     render_flowise_explanation_section(
