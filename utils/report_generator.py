@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.library_usage import build_pandas_numpy_usage
+from utils.viva_summary import build_viva_summary
 from src.ai.flowise_client import build_default_flowise_metadata
 
 
@@ -106,6 +107,12 @@ def generate_cleaning_report(
             "details": cleaning_summary.get("nlp_cleaning_actions", []),
         },
     }
+    viva_summary = build_viva_summary(
+        original_file_name=original_file_name,
+        cleaning_summary=cleaning_summary,
+        ml_recommendation=ml_recommendation,
+        cleaning_actions=cleaning_actions,
+    )
 
     report_data = {
         "original_file_name": original_file_name,
@@ -163,6 +170,7 @@ def generate_cleaning_report(
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
         "algorithm_recommendation": ml_recommendation.get("algorithm_recommendation", {}),
         "pandas_numpy_usage": pandas_numpy_usage,
+        "project_summary_for_viva": viva_summary,
         "flowise_integration": flowise_metadata,
         "before_vs_after_summary": cleaning_summary.get("before_vs_after_summary", {}),
         "cleaning_steps": cleaning_summary.get("cleaning_steps", []),

@@ -241,6 +241,8 @@ class TestFullDatasetWorkflows(unittest.TestCase):
         )
         self.assertEqual(report["flowise_integration"]["flowise_called"], False)
         self.assertFalse(report["flowise_integration"]["full_dataset_sent_to_flowise"])
+        self.assertIn("project_summary_for_viva", report)
+        self.assertIn("spam_full_workflow", report["project_summary_for_viva"]["plain_text"])
         self.assertIn("output_files", report)
         self.assertTrue(Path(report_path).exists())
         self.assertTrue(cleaned_df["label"].equals(df["label"]))
@@ -267,6 +269,7 @@ class TestFullDatasetWorkflows(unittest.TestCase):
         self.assertTrue(cleaned_output.exists())
         self.assertTrue(report_output.exists())
         self.assertIn("Pandas and NumPy Usage", [element.value for element in app.subheader])
+        self.assertIn("Project Summary for Viva", [element.value for element in app.subheader])
 
 
 if __name__ == "__main__":

@@ -86,6 +86,7 @@ class TestCleaningReportActions(unittest.TestCase):
             "Logistic Regression",
         )
         self.assertIn("pandas_numpy_usage", report)
+        self.assertIn("project_summary_for_viva", report)
         self.assertIn("flowise_integration", report)
         numpy_functions = {
             entry["function"] for entry in report["pandas_numpy_usage"]["numpy_functions"]
@@ -93,6 +94,10 @@ class TestCleaningReportActions(unittest.TestCase):
         self.assertIn("np.mean()", numpy_functions)
         self.assertIn("np.std()", numpy_functions)
         self.assertEqual(report["flowise_integration"]["flowise_status"], "skipped")
+        self.assertIn(
+            "Streamlit handles dataset upload and user controls",
+            report["project_summary_for_viva"]["plain_text"],
+        )
         self.assertEqual(len(cleaned_df), len(dataframe))
 
     def test_report_includes_only_relevant_pandas_numpy_usage_for_performed_actions(self):
@@ -150,6 +155,50 @@ class TestCleaningReportActions(unittest.TestCase):
         self.assertIn("get_dummies()", pandas_functions)
         self.assertIn("quantile()", pandas_functions)
         self.assertIn("np.median()", numpy_functions)
+
+    def test_viva_summary_clearly_states_when_no_cleaning_was_applied(self):
+        dataframe = pd.DataFrame(
+            {
+                "age": [20, 25, 30],
+                "city": ["A", "B", "C"],
+                "target": [0, 1, 0],
+            }
+        )
+        cleaning_options = {
+            "remove_duplicates": False,
+            "handle_missing_values": False,
+            "fix_data_types": False,
+            "handle_outliers": False,
+            "encode_categorical": False,
+            "scale_numeric": False,
+            "scaler_choice": None,
+            "nlp_cleaning": False,
+        }
+
+        _, cleaning_summary = clean_dataset(
+            dataframe,
+            cleaning_options,
+            target_column="target",
+        )
+        profile = profile_dataset(dataframe, target_column="target")
+        recommendation = recommend_ml_approach(
+            dataframe,
+            target_column="target",
+            problem_type="Auto-detect",
+            text_columns=profile["text_columns"],
+        )
+        report, _ = generate_cleaning_report(
+            profile,
+            {"errors": [], "warnings": [], "is_valid": True},
+            cleaning_summary,
+            recommendation,
+            "no_cleaning.csv",
+        )
+
+        self.assertIn(
+            "The dataset was profiled and reviewed, but no cleaning actions were applied.",
+            report["project_summary_for_viva"]["plain_text"],
+        )
 
 
 if __name__ == "__main__":

@@ -401,6 +401,12 @@ def render_pandas_numpy_usage_section(pandas_numpy_usage: dict) -> None:
             st.markdown(f"- **{entry['function']}**: {entry['why_used']}")
 
 
+def render_project_summary_for_viva(viva_summary: dict) -> None:
+    """Render a short presentation-friendly project summary."""
+    st.subheader("Project Summary for Viva")
+    st.markdown(viva_summary.get("markdown", "No viva summary is available."))
+
+
 def build_flowise_prompt(
     selected_prompt_type: str,
     dataset_summary: str,
@@ -703,6 +709,9 @@ def render_cleaning_results(
     render_pandas_numpy_usage_section(
         cleaning_report.get("pandas_numpy_usage", {})
     )
+    render_project_summary_for_viva(
+        cleaning_report.get("project_summary_for_viva", {})
+    )
 
     st.subheader("8. Download Output Files")
     st.download_button(
@@ -717,6 +726,14 @@ def render_cleaning_results(
         file_name=Path(cleaning_report_path).name,
         mime="application/json",
     )
+    viva_summary = cleaning_report.get("project_summary_for_viva", {})
+    if viva_summary.get("markdown"):
+        st.download_button(
+            "Download Viva Summary",
+            data=viva_summary["markdown"],
+            file_name=f"project_summary_{cleaned_csv_path.stem}.md",
+            mime="text/markdown",
+        )
     st.success(f"Cleaned CSV saved to: {cleaned_csv_path}")
     st.success(f"Cleaning report saved to: {cleaning_report_path}")
 
