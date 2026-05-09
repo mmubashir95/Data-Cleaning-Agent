@@ -1313,6 +1313,16 @@ def render_cleaning_results(
         st.json(cleaning_report)
 
 
+def _clear_cleaning_state() -> None:
+    """Remove all cleaning-output keys from session state."""
+    for key in (
+        "cleaned_df", "readable_cleaned_df", "ml_ready_df",
+        "cleaning_report", "cleaning_summary", "cleaned_csv_name",
+        "cleaned_csv_path", "cleaning_report_path", "cleaning_completed",
+    ):
+        st.session_state.pop(key, None)
+
+
 def render_uploaded_dataset(
     uploaded_file,
     selected_problem_type: str,
@@ -1323,6 +1333,13 @@ def render_uploaded_dataset(
     The flow deliberately runs as validate -> profile -> recommend -> explain
     -> clean so users can inspect issues before applying transformations.
     """
+    # Detect a new upload and clear stale cleaning results so the user is never
+    # shown outputs from a previously cleaned file.
+    file_id = f"{uploaded_file.name}:{uploaded_file.size}"
+    if st.session_state.get("_uploaded_file_id") != file_id:
+        _clear_cleaning_state()
+        st.session_state["_uploaded_file_id"] = file_id
+
     dataframe, error_message = load_dataset(uploaded_file)
 
     if error_message:
@@ -1446,13 +1463,27 @@ def render_uploaded_dataset(
             st.error(f"Cleaning could not be completed safely. Details: {exc}")
             return
 
+        # Persist all cleaning outputs so that download-button reruns do not
+        # reset the UI. Everything written here survives subsequent reruns.
+        st.session_state["cleaned_df"] = cleaned_df
+        st.session_state["cleaning_summary"] = cleaning_summary
+        st.session_state["cleaning_report"] = cleaning_report
+        st.session_state["cleaned_csv_name"] = cleaned_csv_name
+        st.session_state["cleaned_csv_path"] = cleaned_csv_path
+        st.session_state["cleaning_report_path"] = cleaning_report_path
+        st.session_state["cleaning_completed"] = True
+
+    # Render cleaning results on every rerun as long as cleaning has been done
+    # for the current file. Download buttons trigger reruns, so reading from
+    # session_state here keeps the UI visible without re-running the pipeline.
+    if st.session_state.get("cleaning_completed"):
         render_cleaning_results(
-            cleaned_df,
-            cleaning_summary,
-            cleaning_report,
-            cleaned_csv_name,
-            cleaned_csv_path,
-            cleaning_report_path,
+            st.session_state["cleaned_df"],
+            st.session_state["cleaning_summary"],
+            st.session_state["cleaning_report"],
+            st.session_state["cleaned_csv_name"],
+            st.session_state["cleaned_csv_path"],
+            st.session_state["cleaning_report_path"],
         )
 
 
