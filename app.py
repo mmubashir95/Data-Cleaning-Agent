@@ -1518,6 +1518,16 @@ def render_uploaded_dataset(
                 cleaning_summary["ml_ready_csv_path"] = str(ml_ready_csv_path)
                 cleaning_summary["readable_dataset_columns"] = list(readable_dataset.columns)
                 cleaning_summary["ml_ready_dataset_columns"] = list(ml_ready_dataset.columns)
+                cleaning_summary["readable_dataset_rows"] = len(readable_dataset)
+                cleaning_summary["ml_ready_dataset_rows"] = len(ml_ready_dataset)
+                cleaning_summary["rows_removed_total"] = cleaning_summary["original_rows"] - len(cleaned_df)
+                if not cleaning_summary.get("row_removal_reasons"):
+                    cleaning_summary["row_removal_reasons"] = [
+                        {
+                            "reason": "No rows were removed because no exact duplicates or unusable records were found.",
+                            "rows_removed": 0,
+                        }
+                    ]
 
             cleaning_report, cleaning_report_path = generate_cleaning_report(
                 profile,

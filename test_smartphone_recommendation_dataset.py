@@ -79,6 +79,41 @@ def _smartphone_df() -> pd.DataFrame:
 
 
 class TestSmartphoneRecommendationDataset(unittest.TestCase):
+    def test_duplicate_removal_keeps_distinct_smartphones_with_similar_names(self):
+        df = pd.DataFrame(
+            {
+                "model": ["Motorola Moto G82 5G", "Motorola Moto G82 5G"],
+                "Price": ["Rs.19999", "Rs.20999"],
+                "rating": [81, 82],
+                "sim": ["Dual Sim, 4G, 5G, VoLTE, Wi-Fi", "Dual Sim, 4G, 5G, VoLTE, Wi-Fi"],
+                "processor": ["snapdragon 695, octa core, 2.2?ghz processor", "snapdragon 695, octa core, 2.2?ghz processor"],
+                "ram": ["6GB RAM, 128GB inbuilt", "8GB RAM, 128GB inbuilt"],
+                "battery": ["5000mAh Battery with 30W Fast Charging", "5000mAh Battery with 30W Fast Charging"],
+                "display": ["6.6 inches, 1080?x?2400?px, 120 Hz Display", "6.6 inches, 1080?x?2400?px, 120 Hz Display"],
+                "camera": ["50?MP + 8?MP + 2?MP Triple Rear & 16?MP Front Camera", "50?MP + 8?MP + 2?MP Triple Rear & 16?MP Front Camera"],
+                "card": ["memory card supported, upto 1TB", "memory card supported, upto 1TB"],
+                "os": ["Android v12", "Android v12"],
+                "Segment": [None, None],
+            }
+        )
+        cleaned_df, summary = clean_dataset(
+            df,
+            {
+                "remove_duplicates": True,
+                "handle_missing_values": True,
+                "fix_data_types": True,
+                "handle_outliers": True,
+                "encode_categorical": True,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
+                "nlp_cleaning": False,
+            },
+            target_column="Segment",
+        )
+
+        self.assertEqual(len(cleaned_df), 2)
+        self.assertEqual(summary["semantic_duplicate_rows_removed"], 0)
+
     def test_detection_and_preprocessing_extract_recommendation_features(self):
         df = _smartphone_df()
         self.assertTrue(detect_smartphone_dataset(df.columns))

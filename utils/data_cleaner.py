@@ -116,6 +116,7 @@ def clean_dataset(
     smartphone_columns_dropped: list[str] = []
     scalable_numeric_feature_columns: list[str] = []
     smartphone_validation_checks: list[dict[str, Any]] = []
+    row_removal_reasons: list[dict[str, Any]] = []
 
     original_rows = len(df)
     original_columns = len(df.columns)
@@ -146,6 +147,13 @@ def clean_dataset(
         duplicates_removed = original_rows - len(cleaned_df)
         exact_duplicate_rows_removed = duplicates_removed
         cleaning_steps.append(f"Removed {duplicates_removed} duplicate rows.")
+        if duplicates_removed > 0:
+            row_removal_reasons.append(
+                {
+                    "reason": "Exact duplicate rows removed",
+                    "rows_removed": duplicates_removed,
+                }
+            )
     else:
         duplicates_removed = 0
         cleaning_steps.append("Skipped duplicate removal.")
@@ -187,15 +195,26 @@ def clean_dataset(
             deduplication_strategy = "exact row matching plus normalized product-name, brand, and numeric-price matching"
 
         if options.get("remove_duplicates", False) and {"product_name", "brand", "price"}.intersection(cleaned_df.columns):
-            semantic_keys = build_semantic_product_key(cleaned_df)
-            before_semantic_dedup_rows = len(cleaned_df)
-            cleaned_df = cleaned_df.loc[~semantic_keys.duplicated()].copy()
-            semantic_duplicate_rows_removed = before_semantic_dedup_rows - len(cleaned_df)
-            duplicates_removed += semantic_duplicate_rows_removed
-            if semantic_duplicate_rows_removed > 0:
+            if smartphone_preprocessing_applied:
                 cleaning_steps.append(
-                    f"Removed {semantic_duplicate_rows_removed} near-duplicate product rows using normalized product name, brand, and price."
+                    "Skipped smartphone semantic duplicate removal to preserve recommendation candidates. Only exact duplicate rows are removed for this dataset."
                 )
+            else:
+                semantic_keys = build_semantic_product_key(cleaned_df)
+                before_semantic_dedup_rows = len(cleaned_df)
+                cleaned_df = cleaned_df.loc[~semantic_keys.duplicated()].copy()
+                semantic_duplicate_rows_removed = before_semantic_dedup_rows - len(cleaned_df)
+                duplicates_removed += semantic_duplicate_rows_removed
+                if semantic_duplicate_rows_removed > 0:
+                    cleaning_steps.append(
+                        f"Removed {semantic_duplicate_rows_removed} near-duplicate product rows using normalized product name, brand, and price."
+                    )
+                    row_removal_reasons.append(
+                        {
+                            "reason": "Semantic near-duplicate product rows removed",
+                            "rows_removed": semantic_duplicate_rows_removed,
+                        }
+                    )
 
     if fix_data_types_selected:
         for column in cleaned_df.columns:
@@ -672,6 +691,7 @@ def clean_dataset(
         "smartphone_columns_dropped": sorted(set(smartphone_columns_dropped)),
         "scalable_numeric_feature_columns": scalable_numeric_feature_columns,
         "smartphone_validation_checks": smartphone_validation_checks,
+        "row_removal_reasons": row_removal_reasons,
         "recommendation_ready": recommendation_ready,
         "original_numeric_columns_preserved": original_numeric_columns_preserved,
         "domain_outlier_rules_applied": domain_outlier_rules_applied,
