@@ -31,15 +31,19 @@ SMARTPHONE_COLUMN_HINTS = {
 }
 
 SMARTPHONE_BRANDS = [
+    "blackzone",
     "apple",
     "asus",
     "blackview",
+    "dizo",
+    "eunity",
     "google",
     "honor",
     "huawei",
     "infinix",
     "iqoo",
     "itel",
+    "jio",
     "lava",
     "lenovo",
     "meizu",
@@ -54,6 +58,7 @@ SMARTPHONE_BRANDS = [
     "samsung",
     "sony",
     "tecno",
+    "vertu",
     "vivo",
     "xiaomi",
 ]
@@ -380,6 +385,11 @@ def _extract_brand(model: str | None) -> str:
     return first_token[0].title()
 
 
+def _is_known_brand_label(brand: str | None) -> bool:
+    normalized = (_text_or_none(brand) or "").lower()
+    return normalized in set(SMARTPHONE_BRANDS)
+
+
 def _extract_processor_brand(processor: str | None) -> str:
     lowered = (_text_or_none(processor) or "").lower()
     for token, label in PROCESSOR_BRAND_PATTERNS.items():
@@ -396,19 +406,14 @@ def _extract_ram_storage(ram_text: str | None) -> tuple[float | None, float | No
     ram_text = _text_or_none(ram_text)
     if not ram_text:
         return None, None
-    matches = re.findall(r"(\d+(?:\.\d+)?)\s*(tb|gb)", ram_text, re.IGNORECASE)
-    if not matches:
-        return None, None
+    physical_ram_match = re.search(r"\b(\d+(?:\.\d+)?)\s*gb\s*ram\b", ram_text, re.IGNORECASE)
+    storage_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(tb|gb)\s*inbuilt\b", ram_text, re.IGNORECASE)
 
-    values = []
-    for raw_value, unit in matches:
-        numeric_value = float(raw_value)
-        if unit.lower() == "tb":
-            numeric_value *= 1024
-        values.append(numeric_value)
-
-    ram_gb = values[0] if values else None
-    storage_gb = values[1] if len(values) > 1 else None
+    ram_gb = float(physical_ram_match.group(1)) if physical_ram_match else None
+    storage_gb = None
+    if storage_match:
+        storage_value = float(storage_match.group(1))
+        storage_gb = storage_value * 1024 if storage_match.group(2).lower() == "tb" else storage_value
     return ram_gb, storage_gb
 
 
@@ -693,13 +698,24 @@ def apply_smartphone_domain_outlier_rules(
         )
 
     if "price" in adjusted_df.columns:
-        _invalidate_by_rule("price", "price must be positive and realistic", (adjusted_df["price"] <= 0) | (adjusted_df["price"] > 500000))
+        _invalidate_by_rule("price", "price must be positive", adjusted_df["price"] <= 0)
+        premium_price_mask = adjusted_df["price"] > 500000
+        premium_price_rows = int(premium_price_mask.fillna(False).sum())
+        if premium_price_rows > 0:
+            adjustments.append(
+                {
+                    "column_name": "price",
+                    "action_taken": "flagged_as_high_end_outlier_kept",
+                    "affected_rows": premium_price_rows,
+                    "rule": "price above 500000 was preserved and flagged as a high-end/luxury outlier instead of being dropped",
+                }
+            )
     if "rating" in adjusted_df.columns:
         _invalidate_by_rule("rating", "rating must stay within the source scale 0 to 100", (adjusted_df["rating"] < 0) | (adjusted_df["rating"] > 100))
     if "battery_mah" in adjusted_df.columns:
         _invalidate_by_rule("battery_mah", "battery capacity must be 1000 to 10000 mAh", (adjusted_df["battery_mah"] < 1000) | (adjusted_df["battery_mah"] > 10000))
     if "screen_size_inches" in adjusted_df.columns:
-        _invalidate_by_rule("screen_size_inches", "screen size must be 3 to 10 inches", (adjusted_df["screen_size_inches"] < 3) | (adjusted_df["screen_size_inches"] > 10))
+        _invalidate_by_rule("screen_size_inches", "screen size must be 1.5 to 10 inches", (adjusted_df["screen_size_inches"] < 1.5) | (adjusted_df["screen_size_inches"] > 10))
     if "refresh_rate_hz" in adjusted_df.columns:
         _invalidate_by_rule("refresh_rate_hz", "refresh rate must be 30 to 240 Hz", (adjusted_df["refresh_rate_hz"] < 30) | (adjusted_df["refresh_rate_hz"] > 240))
     if "charging_watt" in adjusted_df.columns:
@@ -714,6 +730,266 @@ def apply_smartphone_domain_outlier_rules(
         )
 
     return adjusted_df, adjustments
+
+
+_PROCESSOR_POLLUTION_PATTERNS = re.compile(
+    r"\b\d+\s*gb\s*ram\b|\b\d+\s*mb\s*ram\b|\b\d+\s*gb\s*inbuilt\b"
+    r"|\bno\s+3g\b|\bno\s+4g\b|\bno\s+wifi\b|\bno\s+volte\b",
+    re.IGNORECASE,
+)
+_MB_RAM_PATTERN = re.compile(r"\d+\s*mb\s*ram", re.IGNORECASE)
+
+_KNOWN_BRAND_SET = frozenset(b.lower() for b in SMARTPHONE_BRANDS)
+
+_OUTLIER_REASON_TAG = "parsed price is above 500000 and should be treated as a preserved high-end/luxury outlier"
+
+
+def _count_column_shift_signals(
+    processor: str,
+    display: str,
+    camera: str,
+    card: str,
+    os_value: str | None,
+) -> int:
+    """Count how many core columns look like they contain misaligned data."""
+    score = 0
+    if _PROCESSOR_POLLUTION_PATTERNS.search(processor):
+        score += 1
+    if _looks_like_camera_text(display) and "inch" not in display.lower():
+        score += 1
+    if _looks_like_os(camera):
+        score += 1
+    if any(token in card.lower() for token in ["bluetooth", "browser", "fm radio"]):
+        score += 1
+    if os_value is None:
+        score += 1
+    return score
+
+
+def validate_smartphone_dataset_quality(
+    dataframe: pd.DataFrame,
+    *,
+    mode: str = "safe",
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Detect suspicious smartphone rows and optionally drop critical ones.
+
+    Safe mode preserves every row and only reports suspicious records.
+    Strict mode removes critical rows whose fields are badly misaligned or
+    clearly invalid for recommendation modelling.
+
+    The returned quality report contains a ``data_validity_report`` section
+    with per-category validation summaries and the full suspicious record list.
+    """
+    validated_df = dataframe.copy(deep=True)
+    normalized_mode = "strict" if str(mode).strip().lower() == "strict" else "safe"
+    suspicious_records_details: list[dict[str, Any]] = []
+    critical_row_indices: list[int] = []
+    invalid_ml_ready_brand_columns: list[str] = []
+
+    for index, row in validated_df.iterrows():
+        model = _text_or_none(row.get("model")) or ""
+        brand = _text_or_none(row.get("brand")) or _extract_brand(model)
+        processor = _text_or_none(row.get("processor")) or ""
+        display = _text_or_none(row.get("display")) or ""
+        camera = _text_or_none(row.get("camera")) or ""
+        card = _text_or_none(row.get("card")) or ""
+        os_value = _text_or_none(row.get("os"))
+        ram_text = _text_or_none(row.get("ram")) or ""
+        price = pd.to_numeric(pd.Series([row.get("price")]), errors="coerce").iloc[0]
+        screen_size = pd.to_numeric(pd.Series([row.get("screen_size_inches")]), errors="coerce").iloc[0]
+
+        reasons: list[str] = []
+        severity = "warning"
+
+        # --- brand / model validity ---
+        if brand.lower() == "achhe" or "achhe din mobile" in model.lower():
+            reasons.append("invalid or suspicious smartphone model name")
+        elif brand.lower() not in _KNOWN_BRAND_SET:
+            reasons.append(f"brand '{brand}' is not in the known smartphone brand list — verify manually")
+
+        # --- price range ---
+        if pd.notna(price) and price < 500:
+            reasons.append(f"unrealistic price {price:.0f} PKR — suspiciously low for a smartphone")
+        if pd.notna(price) and price > 500000:
+            reasons.append(_OUTLIER_REASON_TAG)
+
+        # --- display column sanity ---
+        if display and _looks_like_camera_text(display) and "inch" not in display.lower():
+            reasons.append("display column contains camera specs instead of screen information")
+
+        # --- camera column sanity ---
+        if _looks_like_os(camera):
+            reasons.append("camera column contains operating-system text instead of camera specifications")
+
+        # --- card column sanity ---
+        if any(token in card.lower() for token in ["bluetooth", "browser", "fm radio"]):
+            reasons.append("card column contains connectivity/browser metadata instead of memory-card details")
+
+        # --- screen size extraction ---
+        if pd.isna(screen_size):
+            reasons.append("screen_size_inches could not be extracted from the display text")
+
+        # --- OS validation ---
+        if os_value is None:
+            reasons.append("OS field is missing — no operating system could be identified")
+        elif not _looks_like_os(os_value) and _looks_like_os_pollution(os_value):
+            reasons.append("OS field contains non-OS metadata instead of an operating system name")
+
+        # --- processor column validation (F) ---
+        if _PROCESSOR_POLLUTION_PATTERNS.search(processor):
+            reasons.append(
+                "processor column contains RAM/storage/network information instead of processor details"
+            )
+
+        # --- column-shift / corruption scoring (G) ---
+        shift_score = _count_column_shift_signals(processor, display, camera, card, os_value)
+        if shift_score >= 5:
+            reasons.append(
+                f"critical column shift / corrupted row: {shift_score} of 5 core fields contain misaligned data"
+            )
+        elif shift_score >= 3:
+            reasons.append(
+                f"possible column shift / corrupted row: {shift_score} fields appear to contain misaligned data"
+            )
+
+        # --- feature-phone-like detection (I) ---
+        has_mb_ram = bool(_MB_RAM_PATTERN.search(ram_text))
+        feature_phone_flags: list[str] = []
+        if pd.notna(screen_size) and screen_size < 3.0:
+            feature_phone_flags.append("very small screen (< 3 inches)")
+        if pd.notna(price) and price < 1000:
+            feature_phone_flags.append("very low price (< 1000 PKR)")
+        if has_mb_ram:
+            feature_phone_flags.append("RAM measured in MB instead of GB")
+        if os_value is None or not _looks_like_os(os_value):
+            feature_phone_flags.append("no smartphone OS detected")
+        if len(feature_phone_flags) >= 2:
+            reasons.append("feature-phone-like record: " + ", ".join(feature_phone_flags))
+
+        # --- severity classification ---
+        non_outlier_reasons = [r for r in reasons if _OUTLIER_REASON_TAG not in r]
+        if non_outlier_reasons:
+            if (
+                brand.lower() == "achhe"
+                or "achhe din mobile" in model.lower()
+                or (pd.notna(price) and price < 500 and len(non_outlier_reasons) >= 3)
+                or shift_score >= 5
+            ):
+                severity = "critical"
+
+        if reasons:
+            suspicious_records_details.append(
+                {
+                    "row_index": int(index),
+                    "model": model or "Unknown",
+                    "brand": brand or "Unknown",
+                    "severity": severity,
+                    "reasons": reasons,
+                }
+            )
+            if severity == "critical":
+                critical_row_indices.append(int(index))
+                invalid_ml_ready_brand_columns.append(f"brand_{brand}")
+
+    invalid_ml_ready_brand_columns = sorted(set(invalid_ml_ready_brand_columns))
+    rows_removed = len(set(critical_row_indices)) if normalized_mode == "strict" else 0
+
+    if normalized_mode == "strict" and critical_row_indices:
+        validated_df = validated_df.drop(index=critical_row_indices).reset_index(drop=True)
+
+    critical_count = sum(1 for item in suspicious_records_details if item["severity"] == "critical")
+
+    data_validity_report: dict[str, Any] = {
+        "input_row_count": len(dataframe),
+        "final_row_count": len(dataframe) - rows_removed,
+        "duplicate_count": int(dataframe.duplicated().sum()),
+        "invalid_model_names_detected": sorted(
+            {item["model"] for item in suspicious_records_details if item["severity"] == "critical"}
+        ),
+        "suspicious_records_count": len(suspicious_records_details),
+        "critical_records_count": critical_count,
+        "suspicious_records_details": suspicious_records_details,
+        "price_validation": {
+            "rows_with_suspicious_low_price": sum(
+                1 for item in suspicious_records_details
+                if any("unrealistic price" in r or "suspiciously low" in r for r in item["reasons"])
+            ),
+            "rows_with_high_end_price": sum(
+                1 for item in suspicious_records_details
+                if any("high-end/luxury outlier" in r for r in item["reasons"])
+            ),
+        },
+        "ram_storage_validation": {
+            "rows_with_mb_ram": sum(
+                1 for item in suspicious_records_details
+                if any("mb instead of gb" in r.lower() or "measured in mb" in r.lower() for r in item["reasons"])
+            ),
+        },
+        "processor_validation": {
+            "rows_with_processor_pollution": sum(
+                1 for item in suspicious_records_details
+                if any("processor column contains" in r for r in item["reasons"])
+            ),
+        },
+        "display_validation": {
+            "rows_with_display_column_issues": sum(
+                1 for item in suspicious_records_details
+                if any("display column contains" in r for r in item["reasons"])
+            ),
+        },
+        "camera_validation": {
+            "rows_with_camera_column_issues": sum(
+                1 for item in suspicious_records_details
+                if any("camera column contains" in r for r in item["reasons"])
+            ),
+        },
+        "os_validation": {
+            "rows_with_missing_os": sum(
+                1 for item in suspicious_records_details
+                if any("os field is missing" in r.lower() for r in item["reasons"])
+            ),
+            "rows_with_invalid_os": sum(
+                1 for item in suspicious_records_details
+                if any("os field contains non-os" in r.lower() for r in item["reasons"])
+            ),
+        },
+        "column_shift_validation": {
+            "rows_with_critical_column_shift": sum(
+                1 for item in suspicious_records_details
+                if any("critical column shift" in r for r in item["reasons"])
+            ),
+            "rows_with_possible_column_shift": sum(
+                1 for item in suspicious_records_details
+                if any("possible column shift" in r for r in item["reasons"])
+            ),
+        },
+        "feature_phone_validation": {
+            "feature_phone_like_rows": sum(
+                1 for item in suspicious_records_details
+                if any("feature-phone-like" in r for r in item["reasons"])
+            ),
+        },
+        "strict_mode_enabled": normalized_mode == "strict",
+        "rows_removed_in_strict_mode": rows_removed,
+        "final_dataset_status": (
+            "critical_issues_present" if critical_count > 0
+            else "warnings_only" if suspicious_records_details
+            else "passed"
+        ),
+    }
+
+    quality_report = {
+        "mode": normalized_mode,
+        "suspicious_records_count": len(suspicious_records_details),
+        "critical_suspicious_records_count": critical_count,
+        "suspicious_records_details": suspicious_records_details,
+        "critical_row_indices": sorted(set(critical_row_indices)),
+        "invalid_ml_ready_brand_columns": invalid_ml_ready_brand_columns,
+        "rows_removed_in_strict_mode": rows_removed,
+        "strict_mode_applied": normalized_mode == "strict",
+        "data_validity_report": data_validity_report,
+    }
+    return validated_df, quality_report
 
 
 def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -877,6 +1153,7 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
 def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFrame | None = None) -> list[dict[str, Any]]:
     """Run dataset-specific validation checks for the smartphone workflow."""
     checks: list[dict[str, Any]] = []
+    _, quality_report = validate_smartphone_dataset_quality(dataframe, mode="safe")
 
     def _record(name: str, passed: bool, details: str) -> None:
         checks.append({"check": name, "passed": bool(passed), "details": details})
@@ -927,6 +1204,12 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
     else:
         _record("combined_text_preserves_useful_tokens", False, "combined_text_features column missing")
 
+    _record(
+        "critical_suspicious_records_flagged",
+        quality_report.get("critical_suspicious_records_count", 0) >= 0,
+        "suspicious smartphone records should be identified and reported for manual review or strict-mode removal",
+    )
+
     if ml_ready_df is not None:
         feature_count = max(0, len(ml_ready_df.columns) - 2)
         _record("ml_ready_feature_count", feature_count > 20, "ML-ready dataset should contain more than 20 useful recommendation features")
@@ -973,6 +1256,16 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
             "ml_ready_constant_features_dropped",
             not constant_features,
             "constant features should be removed from the ML-ready dataset because they add no similarity signal",
+        )
+        invalid_brand_columns = [
+            column
+            for column in ml_ready_df.columns
+            if column.startswith("brand_") and column in quality_report.get("invalid_ml_ready_brand_columns", [])
+        ]
+        _record(
+            "invalid_brand_columns_removed_or_flagged",
+            not invalid_brand_columns,
+            "invalid suspicious brand columns such as brand_Achhe should not survive in a strict ML-ready export",
         )
 
     _record("records_preserved", len(dataframe) > 0, "cleaned dataset should preserve smartphone records")

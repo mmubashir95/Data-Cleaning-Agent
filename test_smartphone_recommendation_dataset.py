@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -11,7 +12,11 @@ from utils.data_profiler import profile_dataset
 from utils.ecommerce_preprocessing import build_ecommerce_output_datasets, build_ecommerce_preprocessed_view
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report
-from utils.smartphone_preprocessing import detect_smartphone_dataset, validate_smartphone_outputs
+from utils.smartphone_preprocessing import (
+    detect_smartphone_dataset,
+    validate_smartphone_dataset_quality,
+    validate_smartphone_outputs,
+)
 
 
 def _smartphone_df() -> pd.DataFrame:
@@ -79,6 +84,59 @@ def _smartphone_df() -> pd.DataFrame:
 
 
 class TestSmartphoneRecommendationDataset(unittest.TestCase):
+    def test_quality_validator_flags_critical_suspicious_rows_and_supports_strict_mode(self):
+        df = pd.DataFrame(
+            {
+                "model": ["Achhe Din Mobile", "Vertu Signature Touch", "Nokia 105 (2019)"],
+                "Price": ["Rs.99", "Rs.6,50,000", "Rs.1299"],
+                "rating": [None, 62, 54],
+                "sim": [
+                    "Dual Sim, 3G, Wi-Fi",
+                    "Single Sim, 3G, 4G, Wi-Fi, NFC",
+                    "Dual Sim",
+                ],
+                "processor": [
+                    "1?gb ram, 4?gb inbuilt",
+                    "snapdragon 801, octa core, 1.5?ghz processor",
+                    "No",
+                ],
+                "ram": [
+                    "12GB RAM, 512GB inbuilt",
+                    "6GB RAM, 128GB inbuilt",
+                    "4MB RAM",
+                ],
+                "battery": [
+                    "6000mAh Battery with Fast Charging",
+                    "5000mAh Battery with 33W Turbo Charge",
+                    "800mAh Battery",
+                ],
+                "display": [
+                    "2?MP Rear & 0.3?MP Front Camera",
+                    "4.7 inches, 1080?x?1920?px Display",
+                    "1.77 inches, 120?x?160?px Display",
+                ],
+                "camera": [
+                    "Android v5.0 (Lollipop)",
+                    "13?MP Rear & 2.1?MP Front Camera",
+                    "No",
+                ],
+                "card": ["Bluetooth", "Memory Card Not Supported", "Memory Card Not Supported"],
+                "os": [None, "Android v4.4.2 (KitKat)", None],
+                "Segment": [None, None, None],
+            }
+        )
+        preview_df, _ = build_ecommerce_preprocessed_view(df, drop_reference_columns=True)
+
+        safe_df, safe_report = validate_smartphone_dataset_quality(preview_df, mode="safe")
+        self.assertEqual(len(safe_df), 3)
+        self.assertTrue(any(item["model"] == "Achhe Din Mobile" and item["severity"] == "critical" for item in safe_report["suspicious_records_details"]))
+        self.assertIn("brand_Achhe", safe_report["invalid_ml_ready_brand_columns"])
+
+        strict_df, strict_report = validate_smartphone_dataset_quality(preview_df, mode="strict")
+        self.assertEqual(len(strict_df), 2)
+        self.assertFalse(strict_df["model"].astype(str).str.contains("Achhe Din Mobile", case=False, na=False).any())
+        self.assertEqual(strict_report["rows_removed_in_strict_mode"], 1)
+
     def test_duplicate_removal_keeps_distinct_smartphones_with_similar_names(self):
         df = pd.DataFrame(
             {
@@ -319,6 +377,401 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
             "has_fast_charging",
             report["smartphone_preprocessing"]["constant_features_dropped_from_ml_ready"],
         )
+
+    @unittest.skipUnless(
+        Path("/Users/mohammadmubashir/Downloads/Tools-and-Techniques-MidTerm-Spring-2026.csv").exists(),
+        "Real smartphone dataset not available on this machine.",
+    )
+    def test_real_dataset_acceptance_checks(self):
+        real_path = Path("/Users/mohammadmubashir/Downloads/Tools-and-Techniques-MidTerm-Spring-2026.csv")
+        df = pd.read_csv(real_path)
+
+        cleaned_df, summary = clean_dataset(
+            df,
+            {
+                "remove_duplicates": True,
+                "handle_missing_values": True,
+                "fix_data_types": True,
+                "handle_outliers": True,
+                "encode_categorical": True,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
+                "nlp_cleaning": False,
+                "smartphone_quality_mode": "safe",
+            },
+            target_column="Segment",
+        )
+        readable_df, ml_ready_df = build_ecommerce_output_datasets(cleaned_df)
+        summary["smartphone_validation_checks"] = validate_smartphone_outputs(cleaned_df, ml_ready_df)
+        summary["constant_features_dropped_from_ml_ready"] = list(
+            ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", [])
+        )
+
+        self.assertEqual(len(cleaned_df), 1023)
+        self.assertEqual(len(ml_ready_df), 1023)
+        self.assertEqual(int(ml_ready_df.isna().sum().sum()), 0)
+        self.assertEqual(int(cleaned_df["price"].isna().sum()), 0)
+        self.assertEqual(int(cleaned_df["screen_size_inches"].isna().sum()), 0)
+        self.assertEqual(int(cleaned_df["price_scaled"].isna().sum()), 0)
+        self.assertEqual(int(cleaned_df["screen_size_inches_scaled"].isna().sum()), 0)
+        self.assertTrue(readable_df["model"].astype(str).str.contains("Achhe Din Mobile", case=False, na=False).any())
+
+        quality_report = summary["smartphone_dataset_quality"]
+        self.assertTrue(any(item["model"] == "Achhe Din Mobile" and item["severity"] == "critical" for item in quality_report["suspicious_records_details"]))
+        self.assertIn("brand_Achhe", quality_report["invalid_ml_ready_brand_columns"])
+
+        invalid_brand_check = next(
+            check for check in summary["smartphone_validation_checks"]
+            if check["check"] == "invalid_brand_columns_removed_or_flagged"
+        )
+        self.assertFalse(invalid_brand_check["passed"])
+        self.assertIn("brand_Achhe", ml_ready_df.columns)
+
+        vertu_rows = cleaned_df.loc[
+            cleaned_df["model"].astype(str).str.contains("Vertu Signature Touch", case=False, na=False),
+            ["model", "price"],
+        ]
+        self.assertEqual(float(vertu_rows.iloc[0]["price"]), 650000.0)
+
+        for expected_value in [1.77, 1.8, 2.0, 2.4, 2.7, 2.8]:
+            self.assertTrue((cleaned_df["screen_size_inches"] == expected_value).any(), expected_value)
+
+        strict_cleaned_df, strict_summary = clean_dataset(
+            df,
+            {
+                "remove_duplicates": True,
+                "handle_missing_values": True,
+                "fix_data_types": True,
+                "handle_outliers": True,
+                "encode_categorical": True,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
+                "nlp_cleaning": False,
+                "smartphone_quality_mode": "strict",
+            },
+            target_column="Segment",
+        )
+        self.assertLess(len(strict_cleaned_df), 1023)
+        self.assertFalse(strict_cleaned_df["model"].astype(str).str.contains("Achhe Din Mobile", case=False, na=False).any())
+        self.assertTrue(strict_summary["suspicious_records_details"])
+
+
+class TestEnhancedValidation(unittest.TestCase):
+    """Tests for processor validation, column-shift scoring, feature-phone detection, and data_validity_report."""
+
+    def _make_corrupted_df(self) -> pd.DataFrame:
+        """Synthetic dataframe that exercises all validation paths."""
+        return pd.DataFrame(
+            {
+                "model": [
+                    "Achhe Din Mobile",       # critical: brand + price + column shift
+                    "Vertu Signature Touch",  # warning: high-end price only
+                    "Nokia 105 (2019)",       # warning: feature phone
+                    "Samsung Galaxy S23",     # clean: no issues
+                ],
+                "Price": ["Rs.99", "Rs.6,50,000", "Rs.1299", "Rs.79999"],
+                "rating": [None, 62, 54, 88],
+                "sim": [
+                    "Dual Sim, 3G, Wi-Fi",
+                    "Single Sim, 4G, Wi-Fi, NFC",
+                    "Dual Sim",
+                    "Dual Sim, 4G, 5G, VoLTE, Wi-Fi, NFC",
+                ],
+                "processor": [
+                    "1?gb ram, 4?gb inbuilt",                     # pollution in processor
+                    "snapdragon 801, octa core, 1.5?ghz processor",
+                    "No",
+                    "snapdragon 8 gen2, octa core, 3.2?ghz processor",
+                ],
+                "ram": [
+                    "12GB RAM, 512GB inbuilt",
+                    "6GB RAM, 128GB inbuilt",
+                    "4MB RAM",                # MB RAM feature-phone signal
+                    "8GB RAM, 256GB inbuilt",
+                ],
+                "battery": [
+                    "6000mAh Battery with Fast Charging",
+                    "5000mAh Battery with 33W Turbo Charge",
+                    "800mAh Battery",
+                    "5000mAh Battery with 45W Fast Charging",
+                ],
+                "display": [
+                    "2?MP Rear & 0.3?MP Front Camera",   # camera data in display
+                    "4.7 inches, 1080?x?1920?px Display",
+                    "1.77 inches, 120?x?160?px Display",
+                    "6.1 inches, 1080?x?2340?px, 120 Hz Display",
+                ],
+                "camera": [
+                    "Android v5.0 (Lollipop)",    # OS in camera
+                    "13?MP Rear & 2.1?MP Front Camera",
+                    "No",
+                    "50?MP + 12?MP Dual Rear & 12?MP Front Camera",
+                ],
+                "card": [
+                    "Bluetooth",                 # connectivity in card
+                    "Memory Card Not Supported",
+                    "Memory Card Not Supported",
+                    "Memory Card Not Supported",
+                ],
+                "os": [None, "Android v4.4.2 (KitKat)", None, "Android v13"],
+                "Segment": [None, None, None, None],
+            }
+        )
+
+    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        preview_df, _ = build_ecommerce_preprocessed_view(df, drop_reference_columns=True)
+        return preview_df
+
+    # --- Minimum test case 1: Achhe Din Mobile flagged as critical ---
+    def test_achhe_din_mobile_is_flagged_as_critical(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        achhe_entries = [
+            item for item in report["suspicious_records_details"]
+            if item["model"] == "Achhe Din Mobile"
+        ]
+        self.assertTrue(achhe_entries, "Achhe Din Mobile must appear in suspicious records")
+        self.assertEqual(achhe_entries[0]["severity"], "critical")
+
+    # --- Minimum test case 2: brand_Achhe causes validate_smartphone_outputs to fail ---
+    def test_brand_achhe_fails_validate_smartphone_outputs(self):
+        df = self._make_corrupted_df()
+        cleaned_df, _ = clean_dataset(
+            df,
+            {
+                "remove_duplicates": False,
+                "handle_missing_values": True,
+                "fix_data_types": True,
+                "handle_outliers": False,
+                "encode_categorical": True,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
+                "nlp_cleaning": False,
+                "smartphone_quality_mode": "safe",
+            },
+        )
+        _, ml_ready_df = build_ecommerce_output_datasets(cleaned_df)
+        checks = validate_smartphone_outputs(cleaned_df, ml_ready_df)
+        brand_check = next(
+            (c for c in checks if c["check"] == "invalid_brand_columns_removed_or_flagged"),
+            None,
+        )
+        self.assertIsNotNone(brand_check, "invalid_brand_columns_removed_or_flagged check must exist")
+        self.assertFalse(brand_check["passed"], "check must FAIL because brand_Achhe is in the ML-ready file")
+
+    # --- Minimum test case 3: Vertu price parses as 650000 ---
+    def test_vertu_signature_touch_price_parses_as_650000(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        vertu_rows = preview[preview["model"].astype(str).str.contains("Vertu", case=False, na=False)]
+        self.assertEqual(len(vertu_rows), 1)
+        self.assertEqual(float(vertu_rows.iloc[0]["price"]), 650000.0)
+
+    # --- Minimum test case 4: Rs.6,50,000 does not become NaN ---
+    def test_rs_6_50_000_does_not_become_nan(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        vertu_price = preview.loc[
+            preview["model"].astype(str).str.contains("Vertu", case=False, na=False), "price"
+        ]
+        self.assertFalse(vertu_price.isna().any(), "Vertu price must not be NaN")
+
+    # --- Minimum test case 5: small screen sizes are extracted ---
+    def test_small_screen_sizes_are_extracted(self):
+        for inch_value, display_text in [
+            (1.77, "1.77 inches, 120x160px Display"),
+            (1.8,  "1.8 inches, 260x240px Display"),
+            (2.0,  "2 inches, 128x160px Display"),
+            (2.4,  "2.4 inches, 320x240px Display"),
+            (2.7,  "2.7 inches, 240x320px Display"),
+            (2.8,  "2.8 inches, 240x320px Display"),
+        ]:
+            sample = pd.DataFrame(
+                {
+                    "model": ["TestPhone"],
+                    "Price": ["Rs.999"],
+                    "rating": [50],
+                    "sim": ["Dual Sim"],
+                    "processor": ["No"],
+                    "ram": ["4MB RAM"],
+                    "battery": ["800mAh Battery"],
+                    "display": [display_text],
+                    "camera": ["No"],
+                    "card": ["Memory Card Not Supported"],
+                    "os": [None],
+                    "Segment": [None],
+                }
+            )
+            preview, _ = build_ecommerce_preprocessed_view(sample, drop_reference_columns=True)
+            self.assertFalse(
+                preview["screen_size_inches"].isna().any(),
+                f"screen_size_inches must be extracted from '{display_text}'",
+            )
+            self.assertEqual(
+                float(preview["screen_size_inches"].iloc[0]),
+                inch_value,
+                f"Expected {inch_value} from '{display_text}'",
+            )
+
+    # --- Minimum test case 6: safe mode preserves all rows ---
+    def test_safe_mode_preserves_all_rows(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        result_df, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        self.assertEqual(len(result_df), len(preview))
+        self.assertEqual(report["rows_removed_in_strict_mode"], 0)
+
+    # --- Minimum test case 7: strict mode removes Achhe Din Mobile ---
+    def test_strict_mode_removes_achhe_din_mobile(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        result_df, report = validate_smartphone_dataset_quality(preview, mode="strict")
+        self.assertFalse(
+            result_df["model"].astype(str).str.contains("Achhe Din Mobile", case=False, na=False).any(),
+            "Achhe Din Mobile must be removed in strict mode",
+        )
+        self.assertGreater(report["rows_removed_in_strict_mode"], 0)
+
+    # --- Minimum test case 8: cleaned file has no missing in key columns ---
+    def test_cleaned_file_has_no_missing_in_key_columns(self):
+        df = _smartphone_df()
+        cleaned_df, _ = clean_dataset(
+            df,
+            {
+                "remove_duplicates": True,
+                "handle_missing_values": True,
+                "fix_data_types": True,
+                "handle_outliers": True,
+                "encode_categorical": True,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
+                "nlp_cleaning": False,
+            },
+        )
+        self.assertEqual(int(cleaned_df["price"].isna().sum()), 0)
+        self.assertEqual(int(cleaned_df["screen_size_inches"].isna().sum()), 0)
+        self.assertEqual(int(cleaned_df["price_scaled"].isna().sum()), 0)
+        self.assertEqual(int(cleaned_df["screen_size_inches_scaled"].isna().sum()), 0)
+
+    # --- Minimum test case 9: ML-ready file has 0 missing values ---
+    def test_ml_ready_has_zero_missing_values(self):
+        df = _smartphone_df()
+        cleaned_df, _ = clean_dataset(
+            df,
+            {
+                "remove_duplicates": False,
+                "handle_missing_values": True,
+                "fix_data_types": True,
+                "handle_outliers": True,
+                "encode_categorical": True,
+                "scale_numeric": True,
+                "scaler_choice": "StandardScaler",
+                "nlp_cleaning": False,
+            },
+        )
+        _, ml_ready_df = build_ecommerce_output_datasets(cleaned_df)
+        self.assertEqual(int(ml_ready_df.isna().sum().sum()), 0)
+
+    # --- Minimum test case 10: suspicious_records_details is in validation report ---
+    def test_validation_report_includes_suspicious_records_details(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        self.assertIn("suspicious_records_details", report)
+        self.assertIsInstance(report["suspicious_records_details"], list)
+
+    # --- Processor validation ---
+    def test_processor_column_pollution_is_detected(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        achhe_entry = next(
+            (item for item in report["suspicious_records_details"] if item["model"] == "Achhe Din Mobile"),
+            None,
+        )
+        self.assertIsNotNone(achhe_entry)
+        processor_reasons = [r for r in achhe_entry["reasons"] if "processor column" in r.lower()]
+        self.assertTrue(processor_reasons, "Processor pollution must be flagged for Achhe Din Mobile")
+
+    # --- Column-shift scoring ---
+    def test_critical_column_shift_is_reported_for_achhe(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        achhe_entry = next(
+            (item for item in report["suspicious_records_details"] if item["model"] == "Achhe Din Mobile"),
+            None,
+        )
+        self.assertIsNotNone(achhe_entry)
+        shift_reasons = [r for r in achhe_entry["reasons"] if "column shift" in r.lower()]
+        self.assertTrue(shift_reasons, "Column shift must be flagged for Achhe Din Mobile")
+        self.assertTrue(any("critical" in r.lower() for r in shift_reasons))
+
+    # --- Feature-phone detection ---
+    def test_feature_phone_like_records_are_flagged_as_warnings(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        nokia_entry = next(
+            (item for item in report["suspicious_records_details"] if "Nokia 105" in item["model"]),
+            None,
+        )
+        self.assertIsNotNone(nokia_entry, "Nokia 105 must appear in suspicious records as a feature-phone-like entry")
+        self.assertEqual(nokia_entry["severity"], "warning", "Feature-phone-like Nokia 105 must be warning, not critical")
+        fp_reasons = [r for r in nokia_entry["reasons"] if "feature-phone" in r.lower()]
+        self.assertTrue(fp_reasons, "Feature-phone-like reason must be reported for Nokia 105")
+
+    # --- data_validity_report structure ---
+    def test_data_validity_report_structure_is_present(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        dvr = report.get("data_validity_report")
+        self.assertIsNotNone(dvr, "data_validity_report must be present in quality report")
+        for required_key in [
+            "input_row_count",
+            "final_row_count",
+            "suspicious_records_count",
+            "critical_records_count",
+            "suspicious_records_details",
+            "price_validation",
+            "processor_validation",
+            "display_validation",
+            "camera_validation",
+            "os_validation",
+            "column_shift_validation",
+            "feature_phone_validation",
+            "strict_mode_enabled",
+            "rows_removed_in_strict_mode",
+            "final_dataset_status",
+        ]:
+            self.assertIn(required_key, dvr, f"data_validity_report must contain '{required_key}'")
+
+    def test_data_validity_report_counts_are_accurate(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        dvr = report["data_validity_report"]
+        self.assertEqual(dvr["input_row_count"], len(preview))
+        self.assertGreaterEqual(dvr["suspicious_records_count"], 1)
+        self.assertGreaterEqual(dvr["critical_records_count"], 1)
+        self.assertEqual(dvr["final_dataset_status"], "critical_issues_present")
+        self.assertGreater(dvr["column_shift_validation"]["rows_with_critical_column_shift"], 0)
+        self.assertGreater(dvr["processor_validation"]["rows_with_processor_pollution"], 0)
+        self.assertGreater(dvr["feature_phone_validation"]["feature_phone_like_rows"], 0)
+        self.assertGreater(dvr["os_validation"]["rows_with_missing_os"], 0)
+
+    def test_data_validity_report_strict_mode_counts_rows_removed(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="strict")
+        dvr = report["data_validity_report"]
+        self.assertTrue(dvr["strict_mode_enabled"])
+        self.assertGreater(dvr["rows_removed_in_strict_mode"], 0)
+        self.assertLess(dvr["final_row_count"], dvr["input_row_count"])
+
+    def test_clean_row_has_no_suspicious_flags(self):
+        preview = self._preprocess(self._make_corrupted_df())
+        _, report = validate_smartphone_dataset_quality(preview, mode="safe")
+        samsung_entries = [
+            item for item in report["suspicious_records_details"]
+            if "Samsung Galaxy S23" in item["model"]
+        ]
+        # Samsung Galaxy S23 is a clean well-known brand — it may have an unknown-brand
+        # warning but must not be critical and must not have column-shift or processor flags.
+        for entry in samsung_entries:
+            self.assertNotEqual(entry["severity"], "critical")
+            critical_reasons = [r for r in entry["reasons"] if "column shift" in r.lower() or "processor column" in r.lower()]
+            self.assertEqual(critical_reasons, [])
 
 
 if __name__ == "__main__":

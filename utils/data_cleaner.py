@@ -20,6 +20,7 @@ from utils.smartphone_preprocessing import (
     BOOLEAN_FEATURE_COLUMNS,
     apply_smartphone_domain_outlier_rules,
     detect_smartphone_dataset,
+    validate_smartphone_dataset_quality,
     validate_smartphone_outputs,
 )
 
@@ -116,6 +117,7 @@ def clean_dataset(
     smartphone_columns_dropped: list[str] = []
     scalable_numeric_feature_columns: list[str] = []
     smartphone_validation_checks: list[dict[str, Any]] = []
+    smartphone_dataset_quality: dict[str, Any] = {}
     row_removal_reasons: list[dict[str, Any]] = []
 
     original_rows = len(df)
@@ -176,6 +178,29 @@ def clean_dataset(
         noise_fixes = ecommerce_metadata.get("noise_fixes", [])
         smartphone_columns_dropped = ecommerce_metadata.get("columns_dropped", [])
         scalable_numeric_feature_columns = ecommerce_metadata.get("scalable_numeric_feature_columns", [])
+        smartphone_quality_mode = options.get("smartphone_quality_mode", "safe")
+
+        if smartphone_preprocessing_applied:
+            cleaned_df, smartphone_dataset_quality = validate_smartphone_dataset_quality(
+                cleaned_df,
+                mode=smartphone_quality_mode,
+            )
+            suspicious_records = smartphone_dataset_quality.get("suspicious_records_details", [])
+            if suspicious_records:
+                cleaning_steps.append(
+                    f"Ran smartphone data-validity checks in {smartphone_quality_mode} mode and flagged {len(suspicious_records)} suspicious record(s)."
+                )
+            if smartphone_dataset_quality.get("rows_removed_in_strict_mode", 0) > 0:
+                removed_count = smartphone_dataset_quality["rows_removed_in_strict_mode"]
+                cleaning_steps.append(
+                    f"Strict smartphone quality mode removed {removed_count} critical invalid row(s) before ML preparation."
+                )
+                row_removal_reasons.append(
+                    {
+                        "reason": "Critical suspicious smartphone rows removed in strict quality mode",
+                        "rows_removed": removed_count,
+                    }
+                )
 
         if smartphone_preprocessing_applied:
             cleaning_steps.append(
@@ -420,6 +445,39 @@ def clean_dataset(
             )
     else:
         cleaning_steps.append("Skipped outlier handling.")
+
+    if smartphone_preprocessing_applied:
+        repaired_columns: list[str] = []
+        numeric_repair_columns = sorted(
+            {
+                *cleaned_numeric_columns,
+                *extracted_feature_columns,
+                "price_scaled",
+                "rating_scaled",
+                "screen_size_inches_scaled",
+            }
+        )
+        for column in normalized_categorical_columns:
+            if column in cleaned_df.columns and cleaned_df[column].isna().any():
+                cleaned_df[column] = cleaned_df[column].fillna("Unknown")
+                repaired_columns.append(column)
+        for column in BOOLEAN_FEATURE_COLUMNS:
+            if column in cleaned_df.columns and cleaned_df[column].isna().any():
+                cleaned_df[column] = cleaned_df[column].fillna(0).astype(int)
+                repaired_columns.append(column)
+        for column in numeric_repair_columns:
+            if column not in cleaned_df.columns or not cleaned_df[column].isna().any():
+                continue
+            series = pd.to_numeric(cleaned_df[column], errors="coerce")
+            median_value = series.median(skipna=True)
+            cleaned_df[column] = series.fillna(0 if pd.isna(median_value) else median_value)
+            repaired_columns.append(column)
+        if repaired_columns:
+            cleaning_steps.append(
+                "Repaired remaining smartphone-specific missing values after validation and outlier checks for: "
+                + ", ".join(sorted(set(repaired_columns)))
+                + "."
+            )
 
     if encode_categorical_selected:
         classification = classify_columns(cleaned_df, target_column=effective_target_column)
@@ -692,6 +750,9 @@ def clean_dataset(
         "smartphone_columns_dropped": sorted(set(smartphone_columns_dropped)),
         "scalable_numeric_feature_columns": scalable_numeric_feature_columns,
         "smartphone_validation_checks": smartphone_validation_checks,
+        "smartphone_dataset_quality": smartphone_dataset_quality,
+        "suspicious_records_details": smartphone_dataset_quality.get("suspicious_records_details", []),
+        "invalid_ml_ready_brand_columns": smartphone_dataset_quality.get("invalid_ml_ready_brand_columns", []),
         "row_removal_reasons": row_removal_reasons,
         "recommendation_ready": recommendation_ready,
         "original_numeric_columns_preserved": original_numeric_columns_preserved,

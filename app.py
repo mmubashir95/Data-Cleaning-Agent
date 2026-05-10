@@ -1231,6 +1231,32 @@ def render_cleaning_results(
                 "Two outputs are available for this dataset: a human-readable cleaned CSV for viva and review, and a fully ML-ready CSV for future recommendation or ranking models."
             )
 
+    if cleaning_summary.get("smartphone_preprocessing_applied"):
+        st.subheader("Data Validity & Suspicious Records Check")
+        smartphone_quality = cleaning_summary.get("smartphone_dataset_quality", {})
+        quality_columns = st.columns(4)
+        quality_columns[0].metric("Quality Mode", str(smartphone_quality.get("mode", "safe")).title())
+        quality_columns[1].metric("Suspicious Records", int(smartphone_quality.get("suspicious_records_count", 0)))
+        quality_columns[2].metric("Critical Records", int(smartphone_quality.get("critical_suspicious_records_count", 0)))
+        quality_columns[3].metric(
+            "Invalid ML Brand Columns",
+            len(cleaning_summary.get("invalid_ml_ready_brand_columns", [])),
+        )
+
+        invalid_brand_columns = cleaning_summary.get("invalid_ml_ready_brand_columns", [])
+        if invalid_brand_columns:
+            st.warning(
+                "Suspicious brand-derived ML columns detected: "
+                + ", ".join(invalid_brand_columns)
+                + ". Safe mode keeps them for review; strict mode removes the critical source rows."
+            )
+
+        suspicious_records = smartphone_quality.get("suspicious_records_details", [])
+        if suspicious_records:
+            st.dataframe(pd.DataFrame(suspicious_records), width="stretch")
+        else:
+            st.success("No suspicious smartphone records were detected.")
+
     if not cleaning_summary["options_used"]["handle_missing_values"]:
         st.info("Missing value handling was not selected, so missing values were not changed.")
 
@@ -1281,6 +1307,7 @@ def render_cleaning_results(
             st.write("Shifted column fixes:", cleaning_summary.get("shifted_column_fixes", []))
             st.write("Noise fixes:", cleaning_summary.get("noise_fixes", []))
             st.write("Smartphone validation checks:", cleaning_summary.get("smartphone_validation_checks", []))
+            st.write("Smartphone dataset quality:", cleaning_summary.get("smartphone_dataset_quality", {}))
 
         st.write("Missing values before cleaning:")
         st.dataframe(

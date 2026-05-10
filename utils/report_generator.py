@@ -75,6 +75,7 @@ def generate_cleaning_report(
     normalized_categorical_columns = cleaning_summary.get("normalized_categorical_columns", [])
     dropped_reference_columns = cleaning_summary.get("dropped_reference_columns", [])
     smartphone_validation_checks = cleaning_summary.get("smartphone_validation_checks", [])
+    smartphone_dataset_quality = cleaning_summary.get("smartphone_dataset_quality", {})
     pandas_numpy_usage = build_pandas_numpy_usage(
         original_file_name=original_file_name,
         profile=profile,
@@ -181,6 +182,8 @@ def generate_cleaning_report(
         "normalized_categorical_columns": normalized_categorical_columns,
         "dropped_reference_columns": dropped_reference_columns,
         "constant_features_dropped_from_ml_ready": cleaning_summary.get("constant_features_dropped_from_ml_ready", []),
+        "suspicious_records_details": cleaning_summary.get("suspicious_records_details", []),
+        "invalid_ml_ready_brand_columns": cleaning_summary.get("invalid_ml_ready_brand_columns", []),
         "recommendation_ready": cleaning_summary.get("recommendation_ready", False)
         or ml_recommendation.get("recommendation_ready", False),
         "ecommerce_preprocessing": {
@@ -202,6 +205,11 @@ def generate_cleaning_report(
             "tb_to_gb_conversion_applied": smartphone_preprocessing_applied,
             "constant_features_dropped_from_ml_ready": cleaning_summary.get("constant_features_dropped_from_ml_ready", []),
             "validation_checks": smartphone_validation_checks,
+            "quality_mode": smartphone_dataset_quality.get("mode"),
+            "suspicious_records_count": smartphone_dataset_quality.get("suspicious_records_count", 0),
+            "critical_suspicious_records_count": smartphone_dataset_quality.get("critical_suspicious_records_count", 0),
+            "suspicious_records_details": smartphone_dataset_quality.get("suspicious_records_details", []),
+            "invalid_ml_ready_brand_columns": smartphone_dataset_quality.get("invalid_ml_ready_brand_columns", []),
             "dataset_purpose": "smartphone recommendation" if smartphone_preprocessing_applied else None,
             "complexity_note": (
                 "This dataset is complex and tricky, so dataset-specific smartphone cleaning was applied instead of only simple generic preprocessing."
