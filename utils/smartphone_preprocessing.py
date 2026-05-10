@@ -357,6 +357,9 @@ def _parse_storage_token_to_gb(text: str | None) -> float | None:
     if text is None or (isinstance(text, float) and pd.isna(text)):
         return None
     text = str(text)
+    lowered = text.lower()
+    if "not supported" in lowered:
+        return 0.0
     match = re.search(r"(\d+(?:\.\d+)?)\s*(tb|gb)", text, re.IGNORECASE)
     if not match:
         return None
@@ -703,6 +706,12 @@ def apply_smartphone_domain_outlier_rules(
         _invalidate_by_rule("charging_watt", "charging wattage must be 1 to 240 W", (adjusted_df["charging_watt"] < 1) | (adjusted_df["charging_watt"] > 240))
     if "processor_speed_ghz" in adjusted_df.columns:
         _invalidate_by_rule("processor_speed_ghz", "processor speed must be 0.5 to 5 GHz", (adjusted_df["processor_speed_ghz"] < 0.5) | (adjusted_df["processor_speed_ghz"] > 5))
+    if "memory_card_max_gb" in adjusted_df.columns:
+        _invalidate_by_rule(
+            "memory_card_max_gb",
+            "memory card capacity must be 0 to 2048 GB",
+            (adjusted_df["memory_card_max_gb"] < 0) | (adjusted_df["memory_card_max_gb"] > 2048),
+        )
 
     return adjusted_df, adjustments
 

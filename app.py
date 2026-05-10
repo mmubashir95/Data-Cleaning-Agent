@@ -1491,13 +1491,14 @@ def render_uploaded_dataset(
             cleaned_csv_name = f"cleaned_{make_safe_stem(uploaded_file.name)}.csv"
             cleaned_csv_path = Path("output") / cleaned_csv_name
             cleaned_csv_path.parent.mkdir(parents=True, exist_ok=True)
-            cleaned_df.to_csv(cleaned_csv_path, index=False)
+            dataset_to_save_as_cleaned = cleaned_df
 
             if cleaning_summary.get("ecommerce_preprocessing_applied"):
                 readable_dataset, ml_ready_dataset = build_ecommerce_output_datasets(cleaned_df)
                 if cleaning_summary.get("smartphone_preprocessing_applied"):
                     readable_csv_name = "cleaned_readable_smartphone_dataset.csv"
                     ml_ready_csv_name = "ml_ready_smartphone_recommendation_dataset.csv"
+                    dataset_to_save_as_cleaned = readable_dataset
                 else:
                     readable_csv_name = f"cleaned_readable_{make_safe_stem(uploaded_file.name)}.csv"
                     ml_ready_csv_name = f"ml_ready_{make_safe_stem(uploaded_file.name)}.csv"
@@ -1528,6 +1529,8 @@ def render_uploaded_dataset(
                             "rows_removed": 0,
                         }
                     ]
+
+            dataset_to_save_as_cleaned.to_csv(cleaned_csv_path, index=False)
 
             cleaning_report, cleaning_report_path = generate_cleaning_report(
                 profile,

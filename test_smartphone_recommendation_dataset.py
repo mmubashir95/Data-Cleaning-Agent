@@ -177,6 +177,13 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         failed_checks = [check for check in validation_checks if not check["passed"]]
         self.assertEqual(failed_checks, [], failed_checks)
         self.assertGreater(len(ml_ready_df.columns) - 2, 20)
+        self.assertFalse(any(column.endswith("_scaled") for column in readable_df.columns))
+        self.assertFalse(any(column.startswith(("brand_", "os_family_", "processor_brand_", "price_segment_")) for column in readable_df.columns))
+        self.assertIn("brand", readable_df.columns)
+        self.assertIn("os_family", readable_df.columns)
+        self.assertIn("processor_brand", readable_df.columns)
+        self.assertIn("price_segment", readable_df.columns)
+        self.assertIn(1024.0, readable_df["memory_card_max_gb"].tolist())
         self.assertIn("Premium", readable_df["price_segment"].tolist())
         self.assertIn("Flagship", readable_df["price_segment"].tolist())
         for column in [
@@ -195,6 +202,7 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
             self.assertIn(column, ml_ready_df.columns)
         self.assertFalse(ml_ready_df.isna().any().any())
         self.assertNotIn("segment", [column.lower() for column in ml_ready_df.columns])
+        self.assertTrue(readable_df["combined_text_features"].str.contains("1tb", na=False).any())
         self.assertTrue(all("bluetooth" not in column.lower() for column in ml_ready_df.columns if column.startswith("os_family_")))
         self.assertEqual(readable_df.columns[1], "model")
 

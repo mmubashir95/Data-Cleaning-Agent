@@ -198,6 +198,7 @@ def generate_cleaning_report(
             "columns_dropped": cleaning_summary.get("smartphone_columns_dropped", []),
             "shifted_or_misaligned_column_fixes": cleaning_summary.get("shifted_column_fixes", []),
             "question_mark_noise_fixes": cleaning_summary.get("noise_fixes", []),
+            "tb_to_gb_conversion_applied": smartphone_preprocessing_applied,
             "validation_checks": smartphone_validation_checks,
             "dataset_purpose": "smartphone recommendation" if smartphone_preprocessing_applied else None,
             "complexity_note": (
@@ -254,7 +255,7 @@ def generate_cleaning_report(
         },
         "dataset_outputs": {
             "readable_cleaned_dataset_description": (
-                "Human-readable cleaned smartphone dataset with preserved specification text plus extracted recommendation features."
+                "Human-readable cleaned smartphone dataset for EDA, reporting, and viva work. It preserves specification text plus extracted recommendation features, and excludes ML-only one-hot and scaled columns."
                 if smartphone_preprocessing_applied
                 else (
                     "Human-readable cleaned dataset with preserved numeric values and separate scaled columns."
@@ -263,7 +264,7 @@ def generate_cleaning_report(
                 )
             ),
             "ml_ready_dataset_description": (
-                "ML-ready smartphone recommendation dataset containing scaled numeric features, boolean features, and encoded categorical features for cosine-similarity recommendation."
+                "ML-ready smartphone recommendation dataset for cosine-similarity modelling. One-hot encoding and scaling are applied only to this output, alongside boolean and scaled numeric features."
                 if smartphone_preprocessing_applied
                 else (
                     "Model-ready dataset containing scaled numeric features and encoded categorical features for future recommendation or ranking models."

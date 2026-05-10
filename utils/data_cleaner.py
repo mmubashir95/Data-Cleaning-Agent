@@ -373,6 +373,7 @@ def clean_dataset(
                 "refresh_rate_hz",
                 "charging_watt",
                 "processor_speed_ghz",
+                "memory_card_max_gb",
             }
         elif ecommerce_preprocessing_applied:
             skip_iqr_columns = {"rating", "battery_mah", "screen_size_inches"}
