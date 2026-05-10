@@ -541,7 +541,14 @@ def clean_dataset(
 
         if feature_numeric_columns:
             try:
-                if scaler_choice == "MinMaxScaler":
+                effective_scaler_choice = (
+                    "MinMaxScaler" if smartphone_preprocessing_applied else scaler_choice
+                )
+                if smartphone_preprocessing_applied and scaler_choice != "MinMaxScaler":
+                    cleaning_steps.append(
+                        "For the smartphone recommendation dataset, numeric recommendation features are scaled with MinMaxScaler so cosine similarity compares them on a consistent 0 to 1 range."
+                    )
+                if effective_scaler_choice == "MinMaxScaler":
                     scaler = MinMaxScaler()
                     scaler_used = "MinMaxScaler"
                     cleaning_steps.append("MinMaxScaler scales values into a fixed range, usually 0 to 1.")

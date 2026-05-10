@@ -122,6 +122,13 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         self.assertIn("charging_watt", cleaned_df.columns)
         self.assertIn("price_scaled", cleaned_df.columns)
         self.assertIn("rating_scaled", cleaned_df.columns)
+        self.assertEqual(summary["scaler_used"], "MinMaxScaler")
+        self.assertEqual(float(cleaned_df.loc[0, "price"]), 54999.0)
+        self.assertEqual(float(cleaned_df.loc[1, "price"]), 114990.0)
+        self.assertEqual(float(cleaned_df.loc[0, "ram_gb"]), 12.0)
+        self.assertEqual(float(cleaned_df.loc[0, "storage_gb"]), 512.0)
+        self.assertEqual(float(cleaned_df.loc[0, "battery_mah"]), 6000.0)
+        self.assertFalse((cleaned_df["price"] > 0).all() and (cleaned_df["price"] < 1).any())
         self.assertFalse(cleaned_df["rating"].nunique(dropna=True) == 1 and float(cleaned_df["rating"].dropna().iloc[0]) == 5.0)
         self.assertTrue(cleaned_df["price"].astype(str).str.contains("Rs", case=False, na=False).sum() == 0)
         self.assertFalse(cleaned_df["processor"].astype(str).str.contains(r"\?", regex=True, na=False).any())
@@ -135,6 +142,24 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         failed_checks = [check for check in validation_checks if not check["passed"]]
         self.assertEqual(failed_checks, [], failed_checks)
         self.assertGreater(len(ml_ready_df.columns) - 2, 20)
+        self.assertIn("Premium", readable_df["price_segment"].tolist())
+        self.assertIn("Flagship", readable_df["price_segment"].tolist())
+        for column in [
+            "price_scaled",
+            "rating_scaled",
+            "ram_gb_scaled",
+            "storage_gb_scaled",
+            "battery_mah_scaled",
+            "charging_watt_scaled",
+            "screen_size_inches_scaled",
+            "refresh_rate_hz_scaled",
+            "rear_main_camera_mp_scaled",
+            "front_camera_mp_scaled",
+            "processor_speed_ghz_scaled",
+        ]:
+            self.assertIn(column, ml_ready_df.columns)
+        self.assertFalse(ml_ready_df.isna().any().any())
+        self.assertNotIn("segment", [column.lower() for column in ml_ready_df.columns])
         self.assertTrue(all("bluetooth" not in column.lower() for column in ml_ready_df.columns if column.startswith("os_family_")))
         self.assertEqual(readable_df.columns[1], "model")
 

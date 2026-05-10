@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
 
 SMARTPHONE_COLUMN_HINTS = {
     "model",
@@ -415,9 +416,14 @@ def _extract_price(series: pd.Series) -> pd.Series:
         if not text:
             cleaned_values.append(None)
             continue
-        digits = re.sub(r"[^0-9.]", "", text.replace(",", ""))
+        compact_text = text.replace(",", "")
+        matches = re.findall(r"\d+(?:\.\d+)?", compact_text)
+        if not matches:
+            cleaned_values.append(None)
+            continue
         try:
-            cleaned_values.append(float(digits) if digits else None)
+            numeric_text = max(matches, key=len)
+            cleaned_values.append(float(numeric_text))
         except ValueError:
             cleaned_values.append(None)
     return pd.to_numeric(pd.Series(cleaned_values, index=series.index), errors="coerce")
@@ -748,7 +754,56 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     readable_columns = [column for column in readable_priority_columns if column in dataframe.columns]
     readable_df = dataframe[readable_columns].copy(deep=True)
 
+    def _restore_readable_category(
+        target_column: str,
+        encoded_prefix: str,
+        default_value: str = "Unknown",
+    ) -> None:
+        if target_column in readable_df.columns:
+            return
+        encoded_columns = sorted(column for column in dataframe.columns if column.startswith(encoded_prefix))
+        if not encoded_columns:
+            return
+
+        encoded_frame = dataframe[encoded_columns].apply(pd.to_numeric, errors="coerce").fillna(0)
+        restored_values = encoded_frame.idxmax(axis=1).str.replace(encoded_prefix, "", regex=False)
+        insert_position = min(
+            readable_priority_columns.index(target_column),
+            len(readable_df.columns),
+        )
+        readable_df.insert(insert_position, target_column, restored_values.where(restored_values != "", default_value))
+
+    _restore_readable_category("brand", "brand_")
+    _restore_readable_category("processor_brand", "processor_brand_")
+    _restore_readable_category("os_family", "os_family_")
+    _restore_readable_category("price_segment", "price_segment_")
+
     ml_ready_base = dataframe.copy(deep=True)
+    scalable_columns_present = [column for column in SCALABLE_NUMERIC_COLUMNS if column in ml_ready_base.columns]
+
+    # The readable smartphone dataset preserves human-friendly numeric values,
+    # while the ML-ready export recomputes its scaled columns with MinMaxScaler
+    # so cosine similarity can compare features on a common range.
+    if scalable_columns_present:
+        numeric_frame = ml_ready_base[scalable_columns_present].apply(pd.to_numeric, errors="coerce")
+        for column in scalable_columns_present:
+            column_series = numeric_frame[column]
+            median_value = column_series.median(skipna=True)
+            numeric_frame[column] = column_series.fillna(0 if pd.isna(median_value) else median_value)
+
+        scaler = MinMaxScaler()
+        scaled_values = scaler.fit_transform(numeric_frame[scalable_columns_present])
+        for index, column in enumerate(scalable_columns_present):
+            ml_ready_base[f"{column}_scaled"] = scaled_values[:, index]
+
+    for column in BOOLEAN_FEATURE_COLUMNS:
+        if column in ml_ready_base.columns:
+            ml_ready_base[column] = pd.to_numeric(ml_ready_base[column], errors="coerce").fillna(0).astype(int)
+
+    for column in ["brand", "processor_brand", "os_family", "price_segment"]:
+        if column in ml_ready_base.columns:
+            ml_ready_base[column] = ml_ready_base[column].fillna("Unknown")
+
     raw_categoricals = [column for column in ["brand", "processor_brand", "os_family", "price_segment"] if column in ml_ready_base.columns]
     if raw_categoricals:
         ml_ready_base = pd.get_dummies(ml_ready_base, columns=raw_categoricals, drop_first=False)
@@ -763,6 +818,9 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     ml_ready_columns = required_base_columns + scaled_columns + boolean_columns + sorted(categorical_encoded_columns)
     ml_ready_columns = [column for column in ml_ready_columns if column in ml_ready_base.columns]
     ml_ready_df = ml_ready_base[ml_ready_columns].copy(deep=True)
+    if len(ml_ready_df.columns) > 2:
+        feature_columns = [column for column in ml_ready_df.columns if column not in {"phone_id", "model"}]
+        ml_ready_df[feature_columns] = ml_ready_df[feature_columns].apply(pd.to_numeric, errors="coerce").fillna(0)
     return readable_df, ml_ready_df
 
 
@@ -822,11 +880,35 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
     if ml_ready_df is not None:
         feature_count = max(0, len(ml_ready_df.columns) - 2)
         _record("ml_ready_feature_count", feature_count > 20, "ML-ready dataset should contain more than 20 useful recommendation features")
+        required_scaled_columns = [
+            "price_scaled",
+            "rating_scaled",
+            "ram_gb_scaled",
+            "storage_gb_scaled",
+            "battery_mah_scaled",
+            "charging_watt_scaled",
+            "screen_size_inches_scaled",
+            "refresh_rate_hz_scaled",
+            "rear_main_camera_mp_scaled",
+            "front_camera_mp_scaled",
+            "processor_speed_ghz_scaled",
+        ]
+        missing_scaled_columns = [column for column in required_scaled_columns if column not in ml_ready_df.columns]
+        _record(
+            "required_scaled_features_present",
+            not missing_scaled_columns,
+            "ML-ready dataset should include the required scaled numeric smartphone features",
+        )
         polluted_os_columns = [
             column for column in ml_ready_df.columns
             if column.startswith("os_family_") and any(token in column.lower() for token in ["bluetooth", "browser", "memory_card", "fm_radio"])
         ]
         _record("os_encoding_not_polluted", not polluted_os_columns, "polluted OS values should not become OS encoded columns")
+        _record(
+            "ml_ready_has_no_missing_values",
+            not ml_ready_df.isna().any().any(),
+            "ML-ready dataset should not contain missing values",
+        )
 
     _record("records_preserved", len(dataframe) > 0, "cleaned dataset should preserve smartphone records")
     return checks
