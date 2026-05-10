@@ -142,6 +142,28 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         recommendation = recommend_ml_approach(df, None, "Auto-detect", text_columns=[])
         self.assertEqual(recommendation["recommended_problem_type"], "Smartphone Content-Based Recommendation")
         self.assertTrue(recommendation["smartphone_dataset_detected"])
+        self.assertIsNone(recommendation["target_column_used_for_inference"])
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["target_variable_type"],
+            "Not applicable for content-based recommendation",
+        )
+        self.assertEqual(
+            recommendation["detected_text_columns"],
+            ["model", "processor", "display", "camera"],
+        )
+        self.assertEqual(recommendation["ignored_columns"][0]["column"], "Segment")
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["beginner_friendly_first_choice"]["name"],
+            "Content-Based Recommendation with Cosine Similarity",
+        )
+        self.assertEqual(
+            recommendation["algorithm_recommendation"]["recommended_algorithms"][1]["name"],
+            "Clustering for Similar Phone Groups",
+        )
+        not_suitable = {item["approach"]: item["reason"] for item in recommendation["not_suitable_currently"]}
+        self.assertIn("Classification", not_suitable)
+        self.assertIn("Regression", not_suitable)
+        self.assertIn("Collaborative filtering", not_suitable)
 
         cleaned_df, summary = clean_dataset(
             df,

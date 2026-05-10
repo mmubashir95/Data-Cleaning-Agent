@@ -242,6 +242,8 @@ def _describe_target_variable_type(
     recommended_problem_type: str,
 ) -> str:
     """Describe the target in beginner-friendly terms for UI/report output."""
+    if recommended_problem_type == "Smartphone Content-Based Recommendation":
+        return "Not applicable for content-based recommendation"
     if target_column is None:
         if recommended_problem_type == "Clustering":
             return "No target variable provided (unsupervised learning)"
@@ -426,6 +428,17 @@ def _smartphone_detection_confidence(columns: list[str] | pd.Index) -> tuple[str
     if matched_count >= 5:
         return "Medium", matched_count, matched_columns
     return "Low", matched_count, matched_columns
+
+
+def _detect_smartphone_text_columns(df: pd.DataFrame) -> list[str]:
+    """Return the key specification text columns for smartphone recommendation."""
+    preferred_columns = ["model", "processor", "display", "camera"]
+    normalized_columns = {_normalize_name(column): column for column in df.columns}
+    return [
+        normalized_columns[column_name]
+        for column_name in preferred_columns
+        if column_name in normalized_columns
+    ]
 
 
 def _is_unknown_dataset(column_types: dict[str, Any], row_count: int) -> bool:
@@ -646,6 +659,7 @@ def recommend_ml_approach(
     warnings: list[str] = []
     candidate_text_columns = detect_text_columns(df, target_column=target_column)
     detected_text_column = _looks_like_main_nlp_text_feature(df, candidate_text_columns)
+    smartphone_detected_text_columns = _detect_smartphone_text_columns(df) if is_smartphone_dataset else []
     target_suggestions = suggest_target_columns(df, text_columns=text_columns, max_suggestions=3)
     if is_smartphone_dataset:
         target_suggestions = []
@@ -759,6 +773,35 @@ def recommend_ml_approach(
         target_used,
     )
 
+    if recommended_problem_type == "Smartphone Content-Based Recommendation":
+        target_used = None
+
+    ignored_columns: list[dict[str, str]] = []
+    if is_smartphone_dataset and "segment" in {_normalize_name(column) for column in df.columns}:
+        ignored_columns.append(
+            {
+                "column": "Segment",
+                "reason": "It is empty and not usable as a label.",
+            }
+        )
+
+    not_suitable_currently: list[dict[str, str]] = []
+    if recommended_problem_type == "Smartphone Content-Based Recommendation":
+        not_suitable_currently = [
+            {
+                "approach": "Classification",
+                "reason": "Not suitable because Segment is empty and cannot be used as a supervised label.",
+            },
+            {
+                "approach": "Regression",
+                "reason": "Not suitable because the goal is smartphone recommendation, not price prediction.",
+            },
+            {
+                "approach": "Collaborative filtering",
+                "reason": "Not suitable yet because no user ratings, clicks, purchases, or wishlist data are available.",
+            },
+        ]
+
     return {
         "recommended_problem_type": recommended_problem_type,
         "suggested_problem_type": recommended_problem_type,
@@ -781,6 +824,13 @@ def recommend_ml_approach(
         "target_column": target_column,
         "target_column_used_for_inference": target_used,
         "detected_text_column": detected_text_column,
+        "detected_text_columns": (
+            smartphone_detected_text_columns
+            if is_smartphone_dataset
+            else ([detected_text_column] if detected_text_column else [])
+        ),
+        "ignored_columns": ignored_columns,
+        "not_suitable_currently": not_suitable_currently,
         "numeric_columns": column_types["numeric_columns"],
         "categorical_columns": column_types["categorical_columns"],
         "text_columns": column_types["text_columns"],

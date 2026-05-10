@@ -800,7 +800,20 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     st.success(f"Recommended problem type: {ml_recommendation['recommended_problem_type']}")
     st.write(f"Reason: {ml_recommendation['reason']}")
     st.write(f"Target Column Used For Inference: {ml_recommendation['target_column_used_for_inference']}")
-    st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
+    if ml_recommendation.get("smartphone_dataset_detected"):
+        detected_text_columns = ml_recommendation.get("detected_text_columns", [])
+        st.write(
+            "Detected Text Columns: "
+            + (", ".join(detected_text_columns) if detected_text_columns else "None")
+        )
+        ignored_columns = ml_recommendation.get("ignored_columns", [])
+        if ignored_columns:
+            ignored_column = ignored_columns[0]
+            st.write(
+                f"Dropped/Ignored Column: {ignored_column['column']}, because {ignored_column['reason'].rstrip('.')}"
+            )
+    else:
+        st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
     if ml_recommendation.get("recommendation_ready"):
         if ml_recommendation.get("smartphone_dataset_detected"):
             st.info(
@@ -831,6 +844,16 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
             f"{beginner_choice['name']}"
         )
         st.write(f"Why it is suitable: {beginner_choice['reason']}")
+
+    if ml_recommendation.get("smartphone_dataset_detected"):
+        secondary_algorithms = algorithm_recommendation.get("recommended_algorithms", [])[1:2]
+        if secondary_algorithms:
+            st.write(f"Secondary option: {secondary_algorithms[0]['name']}")
+        not_suitable_currently = ml_recommendation.get("not_suitable_currently", [])
+        if not_suitable_currently:
+            st.write("Not suitable currently:")
+            for item in not_suitable_currently:
+                st.markdown(f"- **{item['approach']}**: {item['reason']}")
 
     for warning_message in ml_recommendation["warnings"]:
         st.warning(warning_message)
