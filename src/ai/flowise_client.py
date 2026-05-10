@@ -234,6 +234,12 @@ def build_flowise_profile_object(
         "ecommerce_preprocessing_applied": bool(
             cleaning_report.get("ecommerce_preprocessing_applied", False)
         ),
+        "smartphone_preprocessing_applied": bool(
+            cleaning_report.get("smartphone_preprocessing_applied", False)
+        ),
+        "smartphone_preprocessing_summary": _to_json_safe(
+            cleaning_report.get("smartphone_preprocessing", {})
+        ),
         "dropped_reference_columns": _to_json_safe(
             cleaning_report.get("dropped_reference_columns", [])
         ),

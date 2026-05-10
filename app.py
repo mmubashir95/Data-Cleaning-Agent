@@ -33,6 +33,7 @@ from utils.ecommerce_preprocessing import (
 )
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report, make_safe_stem
+from utils.smartphone_preprocessing import validate_smartphone_outputs
 
 # The AI prompt explicitly tells Flowise to rely on the Python-generated
 # profile. This keeps exact dataset facts grounded in code instead of model
@@ -790,6 +791,10 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.info(
             "This dataset looks like a mobile-product catalog. The app will keep Python responsible for preprocessing and treat the result as future recommendation or ranking readiness unless you explicitly select a target."
         )
+    if ml_recommendation.get("smartphone_dataset_detected"):
+        st.info(
+            "This upload matches the complex smartphone recommendation dataset. Generic cleaning alone is not enough, so smartphone-specific feature extraction and shifted-column handling will be applied."
+        )
 
     st.subheader("5. Recommended ML Algorithm")
     st.success(f"Recommended problem type: {ml_recommendation['recommended_problem_type']}")
@@ -797,12 +802,20 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
     st.write(f"Target Column Used For Inference: {ml_recommendation['target_column_used_for_inference']}")
     st.write(f"Detected Text Column: {ml_recommendation['detected_text_column']}")
     if ml_recommendation.get("recommendation_ready"):
-        st.info(
-            "The current stage prepares the product data for future recommendation or ranking workflows. No recommendation model is trained yet."
-        )
-        st.info(
-            "The system can generate two outputs: a human-readable cleaned dataset with readable numeric values plus separate scaled columns, and a fully ML-ready dataset containing only numeric scaled and encoded features."
-        )
+        if ml_recommendation.get("smartphone_dataset_detected"):
+            st.info(
+                "The current stage prepares this smartphone dataset for content-based recommendation using cosine similarity. No recommendation model is trained yet."
+            )
+            st.info(
+                "The system can generate both a cleaned readable smartphone dataset and a fully ML-ready smartphone recommendation dataset with numeric, boolean, and encoded categorical features."
+            )
+        else:
+            st.info(
+                "The current stage prepares the product data for future recommendation or ranking workflows. No recommendation model is trained yet."
+            )
+            st.info(
+                "The system can generate two outputs: a human-readable cleaned dataset with readable numeric values plus separate scaled columns, and a fully ML-ready dataset containing only numeric scaled and encoded features."
+            )
 
     algorithm_recommendation = ml_recommendation.get("algorithm_recommendation", {})
     beginner_choice = algorithm_recommendation.get("beginner_friendly_first_choice")
@@ -1089,6 +1102,13 @@ def render_cleaning_results(
         st.write(
             f"Scaled columns created: {cleaning_summary.get('scaled_columns_created', [])}"
         )
+    if cleaning_summary.get("smartphone_preprocessing_applied"):
+        st.write(
+            f"Shifted/misaligned smartphone fixes applied: {len(cleaning_summary.get('shifted_column_fixes', []))}"
+        )
+        st.write(
+            f"Noise fixes applied: {cleaning_summary.get('noise_fixes', [])}"
+        )
 
     st.subheader("Cleaning Impact Summary")
     comparison_columns = st.columns(4)
@@ -1165,12 +1185,20 @@ def render_cleaning_results(
             "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
         )
     if cleaning_summary.get("recommendation_ready"):
-        st.info(
-            "The cleaned dataset is more suitable for future product recommendation or ranking workflows, but no model has been trained in this stage."
-        )
-        st.info(
-            "Two outputs are available for this dataset: a human-readable cleaned CSV for viva and review, and a fully ML-ready CSV for future recommendation or ranking models."
-        )
+        if cleaning_summary.get("smartphone_preprocessing_applied"):
+            st.info(
+                "The cleaned dataset is now prepared for a content-based smartphone recommendation system using cosine similarity, but no recommendation model has been trained in this stage."
+            )
+            st.info(
+                "Two outputs are available for this dataset: `cleaned_readable_smartphone_dataset.csv` and `ml_ready_smartphone_recommendation_dataset.csv`."
+            )
+        else:
+            st.info(
+                "The cleaned dataset is more suitable for future product recommendation or ranking workflows, but no model has been trained in this stage."
+            )
+            st.info(
+                "Two outputs are available for this dataset: a human-readable cleaned CSV for viva and review, and a fully ML-ready CSV for future recommendation or ranking models."
+            )
 
     if not cleaning_summary["options_used"]["handle_missing_values"]:
         st.info("Missing value handling was not selected, so missing values were not changed.")
@@ -1218,6 +1246,10 @@ def render_cleaning_results(
         st.write("Type conversion notes:", cleaning_summary.get("type_conversion_notes", []))
         st.write("Deduplication strategy:", cleaning_summary.get("deduplication_strategy"))
         st.write("Domain outlier adjustments:", cleaning_summary.get("domain_outlier_adjustments", []))
+        if cleaning_summary.get("smartphone_preprocessing_applied"):
+            st.write("Shifted column fixes:", cleaning_summary.get("shifted_column_fixes", []))
+            st.write("Noise fixes:", cleaning_summary.get("noise_fixes", []))
+            st.write("Smartphone validation checks:", cleaning_summary.get("smartphone_validation_checks", []))
 
         st.write("Missing values before cleaning:")
         st.dataframe(
@@ -1432,12 +1464,21 @@ def render_uploaded_dataset(
 
             if cleaning_summary.get("ecommerce_preprocessing_applied"):
                 readable_dataset, ml_ready_dataset = build_ecommerce_output_datasets(cleaned_df)
-                readable_csv_name = f"cleaned_readable_{make_safe_stem(uploaded_file.name)}.csv"
-                ml_ready_csv_name = f"ml_ready_{make_safe_stem(uploaded_file.name)}.csv"
+                if cleaning_summary.get("smartphone_preprocessing_applied"):
+                    readable_csv_name = "cleaned_readable_smartphone_dataset.csv"
+                    ml_ready_csv_name = "ml_ready_smartphone_recommendation_dataset.csv"
+                else:
+                    readable_csv_name = f"cleaned_readable_{make_safe_stem(uploaded_file.name)}.csv"
+                    ml_ready_csv_name = f"ml_ready_{make_safe_stem(uploaded_file.name)}.csv"
                 readable_csv_path = Path("output") / readable_csv_name
                 ml_ready_csv_path = Path("output") / ml_ready_csv_name
                 readable_dataset.to_csv(readable_csv_path, index=False)
                 ml_ready_dataset.to_csv(ml_ready_csv_path, index=False)
+                if cleaning_summary.get("smartphone_preprocessing_applied"):
+                    cleaning_summary["smartphone_validation_checks"] = validate_smartphone_outputs(
+                        cleaned_df,
+                        ml_ready_dataset,
+                    )
                 cleaning_summary["readable_cleaned_dataset"] = readable_dataset
                 cleaning_summary["ml_ready_dataset"] = ml_ready_dataset
                 cleaning_summary["readable_cleaned_csv_name"] = readable_csv_name

@@ -59,6 +59,7 @@ def build_viva_summary(
         else "No major cleaning steps were skipped after execution."
     )
     algorithm_list_text = ", ".join(algorithm_names) if algorithm_names else "No algorithm recommendations"
+    smartphone_preprocessing_applied = cleaning_summary.get("smartphone_preprocessing_applied", False)
 
     architecture_text = (
         "Streamlit handles dataset upload and user controls, Python runs the real cleaning engine, "
@@ -74,12 +75,26 @@ def build_viva_summary(
         "limit errors, reduces hallucination, keeps Python responsible for accurate calculations, sends "
         "only a compact dataset profile to Flowise, and scales better for large datasets."
     )
-    dataset_text = (
-        f"For the current dataset '{dataset_name}', the app identified a {problem_type} problem. "
-        f"The target column is '{target_column}'. Cleaning actions performed: {performed_actions_text} "
-        f"Skipped or limited actions: {skipped_actions_text} The recommended starter algorithm is "
-        f"{recommended_algorithm}, with other suggested options including {algorithm_list_text}."
-    )
+    if smartphone_preprocessing_applied:
+        dataset_text = (
+            "The sir-provided dataset is related to smartphones on an e-commerce website. "
+            "The goal is not simple classification because the Segment column is empty and no user rating/history target is available. "
+            "Therefore, I treated it as a content-based recommendation problem. "
+            "The dataset is complex and tricky because many important values are hidden inside text columns. "
+            "For example, processor contains chipset and GHz speed, display contains screen size and refresh rate, "
+            "camera contains MP values, battery contains mAh and charging watts, and card/OS columns may contain noisy or shifted values. "
+            "Because of this, generic cleaning is not enough. "
+            "I used Pandas and NumPy to clean the dataset, remove noise, handle missing values, extract smartphone-specific features, "
+            "encode categorical columns, scale numeric columns, and generate both a cleaned readable dataset and an ML-ready recommendation dataset. "
+            "The final ML-ready dataset can be used with cosine similarity to recommend smartphones based on similar specifications such as price, RAM, storage, battery, display, camera, processor, OS, and connectivity features."
+        )
+    else:
+        dataset_text = (
+            f"For the current dataset '{dataset_name}', the app identified a {problem_type} problem. "
+            f"The target column is '{target_column}'. Cleaning actions performed: {performed_actions_text} "
+            f"Skipped or limited actions: {skipped_actions_text} The recommended starter algorithm is "
+            f"{recommended_algorithm}, with other suggested options including {algorithm_list_text}."
+        )
 
     plain_text = " ".join(
         [

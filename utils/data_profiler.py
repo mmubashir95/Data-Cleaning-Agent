@@ -109,10 +109,13 @@ def _is_id_like(series: pd.Series, column_name: str, row_count: int) -> bool:
     """Detect identifier-style columns using naming and uniqueness heuristics."""
     normalized_name = column_name.lower()
     name_suggests_id = any(
-        token in normalized_name for token in ["id", "uuid", "key", "code", "identifier"]
+        token in normalized_name for token in ["id", "uuid", "key", "code", "identifier", "email", "phone"]
     )
     if name_suggests_id:
         return True
+
+    if row_count < 20:
+        return False
 
     non_null_values = series.dropna()
     if non_null_values.empty or row_count == 0:

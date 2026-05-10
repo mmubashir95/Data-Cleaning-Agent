@@ -28,6 +28,21 @@ MOBILE_ECOMMERCE_COLUMN_HINTS = {
     "product_url",
 }
 
+SMARTPHONE_DATASET_COLUMN_HINTS = {
+    "model",
+    "price",
+    "rating",
+    "sim",
+    "processor",
+    "ram",
+    "battery",
+    "display",
+    "camera",
+    "card",
+    "os",
+    "segment",
+}
+
 REFERENCE_COLUMN_TOKENS = {
     "url",
     "link",
@@ -83,6 +98,10 @@ def detect_mobile_ecommerce_dataset(columns: list[str] | pd.Index) -> bool:
     """Detect whether the dataset looks like a scraped mobile-phone catalog."""
     normalized_columns = {normalize_column_name(column) for column in columns}
     matched_columns = normalized_columns & MOBILE_ECOMMERCE_COLUMN_HINTS
+    smartphone_matches = normalized_columns & SMARTPHONE_DATASET_COLUMN_HINTS
+
+    if len(smartphone_matches) >= 8:
+        return True
 
     if len(matched_columns) >= 5:
         return True
@@ -365,6 +384,22 @@ def build_ecommerce_output_datasets(
     The readable dataset always exposes recognisable label columns; the
     ML-ready dataset contains only numeric scaled and encoded features.
     """
+    smartphone_like_output = (
+        "model" in dataframe.columns
+        and (
+            "combined_text_features" in dataframe.columns
+            or "phone_id" in dataframe.columns
+            or any(
+                column.startswith(("processor_brand_", "os_family_", "price_segment_"))
+                for column in dataframe.columns
+            )
+        )
+    )
+    if smartphone_like_output:
+        from utils.smartphone_preprocessing import build_smartphone_output_datasets
+
+        return build_smartphone_output_datasets(dataframe)
+
     has_raw_brand = "brand" in dataframe.columns
     has_raw_availability = "availability" in dataframe.columns
     brand_encoded_cols = sorted(c for c in dataframe.columns if c.startswith("brand_"))
@@ -446,6 +481,7 @@ def build_ecommerce_preprocessed_view(
     """
     preprocessed_df = dataframe.copy(deep=True)
     metadata: dict[str, Any] = {
+        "smartphone_preprocessing_applied": False,
         "ecommerce_preprocessing_applied": False,
         "cleaned_numeric_columns": [],
         "extracted_feature_columns": [],
@@ -458,6 +494,17 @@ def build_ecommerce_preprocessed_view(
 
     if not detect_mobile_ecommerce_dataset(preprocessed_df.columns):
         return preprocessed_df, metadata
+
+    smartphone_like_columns = {
+        normalize_column_name(column) for column in preprocessed_df.columns
+    } & SMARTPHONE_DATASET_COLUMN_HINTS
+    if len(smartphone_like_columns) >= 8:
+        from utils.smartphone_preprocessing import build_smartphone_preprocessed_view
+
+        return build_smartphone_preprocessed_view(
+            preprocessed_df,
+            drop_reference_columns=drop_reference_columns,
+        )
 
     metadata["ecommerce_preprocessing_applied"] = True
     metadata["recommendation_ready"] = True

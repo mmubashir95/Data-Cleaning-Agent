@@ -10,6 +10,7 @@ from pandas.api.types import is_numeric_dtype
 from utils.data_profiler import classify_columns
 from utils.ecommerce_preprocessing import detect_mobile_ecommerce_dataset
 from utils.nlp_cleaner import detect_text_columns
+from utils.smartphone_preprocessing import detect_smartphone_dataset
 
 CLASSIFICATION_TARGET_HINTS = {
     "target",
@@ -207,6 +208,16 @@ ALGORITHM_MAP = {
             "reason": "After a clear user objective or preference signal is defined, the cleaned numeric product features can support price-value scoring or ranking models.",
         },
     ],
+    "Smartphone Content-Based Recommendation": [
+        {
+            "name": "Content-Based Recommendation with Cosine Similarity",
+            "reason": "This smartphone dataset has no usable target label, so comparing phones by their cleaned specification vectors is the most suitable recommendation approach.",
+        },
+        {
+            "name": "Clustering for Similar Phone Groups",
+            "reason": "Clustering can support market segmentation or similar-device grouping, but it is secondary to direct content-based recommendation here.",
+        },
+    ],
     "Unknown / Needs More Information": [
         {
             "name": "Ask user for more information",
@@ -274,6 +285,11 @@ def _build_algorithm_recommendation(
         summary = (
             "No explicit target variable is available. The dataset looks suitable for future "
             "product recommendation, ranking, or comparison systems after preprocessing."
+        )
+    elif recommended_problem_type == "Smartphone Content-Based Recommendation":
+        summary = (
+            "The dataset is best prepared for content-based smartphone recommendation because "
+            "the Segment column is unusable and no supervised target or user-interaction history exists."
         )
     elif recommended_problem_type == "Clustering":
         summary = (
@@ -358,7 +374,11 @@ def _is_low_cardinality_numeric_classification(series: pd.Series) -> bool:
     if unique_count <= 1:
         return False
 
-    return unique_count <= max(10, int(len(non_null) * 0.05))
+    if unique_count <= 3:
+        return True
+
+    unique_ratio = unique_count / len(non_null)
+    return unique_count <= max(10, int(len(non_null) * 0.05)) and unique_ratio <= 0.2
 
 
 def _is_continuous_numeric_target(series: pd.Series) -> bool:
@@ -403,7 +423,29 @@ def _is_unknown_dataset(column_types: dict[str, Any], row_count: int) -> bool:
         + len(column_types["boolean_columns"])
     )
     id_columns = len(column_types["id_like_columns"])
-    return row_count == 0 or feature_columns == 0 or (id_columns >= feature_columns and feature_columns <= 2)
+    useful_numeric_columns = [
+        column for column in column_types["numeric_columns"] if column not in column_types["id_like_columns"]
+    ]
+    useful_categorical_columns = [
+        column for column in column_types["categorical_columns"] if column not in column_types["id_like_columns"]
+    ]
+    useful_text_columns = [
+        column for column in column_types["text_columns"] if column not in column_types["id_like_columns"]
+    ]
+    only_identifier_like_structure = (
+        not useful_numeric_columns
+        and not useful_categorical_columns
+        and not column_types["boolean_columns"]
+        and not column_types["datetime_columns"]
+        and len(useful_text_columns) <= 1
+        and id_columns >= 2
+    )
+    return (
+        row_count == 0
+        or feature_columns == 0
+        or (id_columns >= feature_columns and feature_columns <= 2)
+        or only_identifier_like_structure
+    )
 
 
 def _infer_problem_type_for_target(
@@ -584,10 +626,13 @@ def recommend_ml_approach(
     """
     column_types = classify_columns(df, target_column=target_column)
     is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
+    is_smartphone_dataset = detect_smartphone_dataset(df.columns)
     warnings: list[str] = []
     candidate_text_columns = detect_text_columns(df, target_column=target_column)
     detected_text_column = _looks_like_main_nlp_text_feature(df, candidate_text_columns)
     target_suggestions = suggest_target_columns(df, text_columns=text_columns, max_suggestions=3)
+    if is_smartphone_dataset:
+        target_suggestions = []
     top_suggestion = target_suggestions[0] if target_suggestions else None
     suggested_target = top_suggestion["column"] if top_suggestion and top_suggestion["score"] >= 5 else None
     suggestion_confidence = top_suggestion["confidence"] if suggested_target else "Low"
@@ -626,14 +671,32 @@ def recommend_ml_approach(
             "recommendation_ready": False,
         }
 
-    if target_column is not None:
+    if (
+        is_smartphone_dataset
+        and target_column is not None
+        and str(target_column).strip().lower() == "segment"
+        and target_column in df.columns
+        and df[target_column].isna().all()
+    ):
+        target_used = None
+        suggested_target_column = None
+        warnings.append(
+            "The Segment column is fully empty in this smartphone dataset, so it is ignored as a target."
+        )
+    elif target_column is not None:
         target_used = target_column
         suggested_target_column = suggested_target
     else:
         target_used = suggested_target
         suggested_target_column = suggested_target
 
-    if problem_type != "Auto-detect":
+    if is_smartphone_dataset and target_used is None and problem_type == "Auto-detect":
+        recommended_problem_type = "Smartphone Content-Based Recommendation"
+        reason = (
+            "This is a complex smartphone e-commerce dataset with an empty Segment column and no user history target, "
+            "so it should be prepared for content-based recommendation using cosine similarity instead of classification or regression."
+        )
+    elif problem_type != "Auto-detect":
         # Manual selection wins over heuristics because user intent is more
         # trustworthy than pattern-based inference.
         recommended_problem_type = problem_type
@@ -703,5 +766,6 @@ def recommend_ml_approach(
         "id_like_columns": column_types["id_like_columns"],
         "algorithms": algorithms,
         "algorithm_recommendation": algorithm_recommendation,
-        "recommendation_ready": bool(is_ecommerce_dataset and target_used is None),
+        "recommendation_ready": bool((is_ecommerce_dataset or is_smartphone_dataset) and target_used is None),
+        "smartphone_dataset_detected": is_smartphone_dataset,
     }

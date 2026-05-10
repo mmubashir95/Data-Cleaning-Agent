@@ -55,7 +55,12 @@ def generate_cleaning_report(
     beginner-friendly explanation. It also records Flowise metadata so the
     project can show exactly what the AI layer did or did not receive.
     """
-    report_name = f"cleaning_report_{make_safe_stem(original_file_name)}.json"
+    smartphone_preprocessing_applied = cleaning_summary.get("smartphone_preprocessing_applied", False)
+    report_name = (
+        "cleaning_report_smartphone_dataset.json"
+        if smartphone_preprocessing_applied
+        else f"cleaning_report_{make_safe_stem(original_file_name)}.json"
+    )
     report_path = Path("reports") / report_name
     options_used = cleaning_summary.get("options_used", {})
     missing_filled = cleaning_summary.get("missing_filled", {})
@@ -69,6 +74,7 @@ def generate_cleaning_report(
     extracted_feature_columns = cleaning_summary.get("extracted_feature_columns", [])
     normalized_categorical_columns = cleaning_summary.get("normalized_categorical_columns", [])
     dropped_reference_columns = cleaning_summary.get("dropped_reference_columns", [])
+    smartphone_validation_checks = cleaning_summary.get("smartphone_validation_checks", [])
     pandas_numpy_usage = build_pandas_numpy_usage(
         original_file_name=original_file_name,
         profile=profile,
@@ -165,6 +171,7 @@ def generate_cleaning_report(
         "outlier_handling_summary": outlier_summary,
         "target_encoding_recommendation": cleaning_summary.get("target_encoding_recommendation"),
         "ecommerce_preprocessing_applied": ecommerce_preprocessing_applied,
+        "smartphone_preprocessing_applied": smartphone_preprocessing_applied,
         "cleaned_numeric_columns": cleaned_numeric_columns,
         "extracted_feature_columns": extracted_feature_columns,
         "normalized_categorical_columns": normalized_categorical_columns,
@@ -181,6 +188,19 @@ def generate_cleaning_report(
             "scaled_columns_created": cleaning_summary.get("scaled_columns_created", []),
             "domain_outlier_rules_applied": cleaning_summary.get("domain_outlier_rules_applied", False),
             "domain_outlier_adjustments": cleaning_summary.get("domain_outlier_adjustments", []),
+        },
+        "smartphone_preprocessing": {
+            "dataset_specific_cleaning_applied": smartphone_preprocessing_applied,
+            "columns_dropped": cleaning_summary.get("smartphone_columns_dropped", []),
+            "shifted_or_misaligned_column_fixes": cleaning_summary.get("shifted_column_fixes", []),
+            "question_mark_noise_fixes": cleaning_summary.get("noise_fixes", []),
+            "validation_checks": smartphone_validation_checks,
+            "dataset_purpose": "smartphone recommendation" if smartphone_preprocessing_applied else None,
+            "complexity_note": (
+                "This dataset is complex and tricky, so dataset-specific smartphone cleaning was applied instead of only simple generic preprocessing."
+                if smartphone_preprocessing_applied
+                else None
+            ),
         },
         "options_used": options_used,
         "cleaning_actions": cleaning_actions,
@@ -206,6 +226,16 @@ def generate_cleaning_report(
         "recommended_ml_problem_type": ml_recommendation.get("recommended_problem_type"),
         "recommended_algorithms": ml_recommendation.get("algorithms", []),
         "algorithm_recommendation": ml_recommendation.get("algorithm_recommendation", {}),
+        "recommendation_algorithm_suggested": (
+            "Content-Based Recommendation using Cosine Similarity"
+            if smartphone_preprocessing_applied
+            else ml_recommendation.get("recommended_problem_type")
+        ),
+        "dataset_explanation": (
+            "This dataset is for smartphone recommendation. It is complex and tricky because important smartphone specifications are hidden inside noisy text fields and some values are shifted across columns."
+            if smartphone_preprocessing_applied
+            else None
+        ),
         "pandas_numpy_usage": pandas_numpy_usage,
         "project_summary_for_viva": viva_summary,
         "flowise_integration": flowise_metadata,
@@ -220,14 +250,22 @@ def generate_cleaning_report(
         },
         "dataset_outputs": {
             "readable_cleaned_dataset_description": (
-                "Human-readable cleaned dataset with preserved numeric values and separate scaled columns."
-                if ecommerce_preprocessing_applied
-                else "Single cleaned dataset exported by the generic workflow."
+                "Human-readable cleaned smartphone dataset with preserved specification text plus extracted recommendation features."
+                if smartphone_preprocessing_applied
+                else (
+                    "Human-readable cleaned dataset with preserved numeric values and separate scaled columns."
+                    if ecommerce_preprocessing_applied
+                    else "Single cleaned dataset exported by the generic workflow."
+                )
             ),
             "ml_ready_dataset_description": (
-                "Model-ready dataset containing scaled numeric features and encoded categorical features for future recommendation or ranking models."
-                if ecommerce_preprocessing_applied
-                else None
+                "ML-ready smartphone recommendation dataset containing scaled numeric features, boolean features, and encoded categorical features for cosine-similarity recommendation."
+                if smartphone_preprocessing_applied
+                else (
+                    "Model-ready dataset containing scaled numeric features and encoded categorical features for future recommendation or ranking models."
+                    if ecommerce_preprocessing_applied
+                    else None
+                )
             ),
             "columns_in_readable_dataset": cleaning_summary.get("readable_dataset_columns", []),
             "columns_in_ml_ready_dataset": cleaning_summary.get("ml_ready_dataset_columns", []),

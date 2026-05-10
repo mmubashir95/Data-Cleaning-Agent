@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
+from utils.data_profiler import classify_columns
 from utils.ecommerce_preprocessing import (
     apply_mobile_domain_outlier_rules,
     build_ecommerce_preprocessed_view,
@@ -15,7 +16,12 @@ from utils.ecommerce_preprocessing import (
     detect_mobile_ecommerce_dataset,
 )
 from utils.nlp_cleaner import clean_text_columns, detect_text_columns
-from utils.data_profiler import classify_columns
+from utils.smartphone_preprocessing import (
+    BOOLEAN_FEATURE_COLUMNS,
+    apply_smartphone_domain_outlier_rules,
+    detect_smartphone_dataset,
+    validate_smartphone_outputs,
+)
 
 
 def _get_mode_or_unknown(series: pd.Series) -> Any:
@@ -27,46 +33,33 @@ def _get_mode_or_unknown(series: pd.Series) -> Any:
 
 
 def _should_convert_to_numeric(series: pd.Series) -> bool:
-    """Check whether an object column looks safely convertible to numeric.
-
-    The threshold is intentionally conservative so mixed columns are not
-    coerced into numeric form too aggressively, which would silently replace
-    many original values with ``NaN``.
-    """
+    """Check whether an object column looks safely convertible to numeric."""
     non_null = series.dropna()
     if non_null.empty:
         return False
-
     as_text = non_null.astype(str).str.strip()
     converted = pd.to_numeric(as_text, errors="coerce")
-    success_ratio = converted.notna().mean()
-    return success_ratio >= 0.7
+    return converted.notna().mean() >= 0.7
 
 
 def _should_convert_to_datetime(series: pd.Series, column_name: str) -> bool:
-    """Check whether an object column looks safely convertible to datetime.
-
-    Conversion is gated by both name/content hints and a success ratio so
-    free-form text is not misclassified as dates.
-    """
+    """Check whether an object column looks safely convertible to datetime."""
     non_null = series.dropna()
     if len(non_null) < 2:
         return False
 
     sample = non_null.astype(str).str.strip().head(100)
-    column_name = column_name.lower()
+    lowered_name = column_name.lower()
     has_datetime_hint = any(
-        token in column_name
+        token in lowered_name
         for token in ["date", "time", "timestamp", "created", "updated", "month", "year"]
     )
     has_format_hint = sample.str.contains(r"[-/:]", regex=True).mean() >= 0.5
-
     if not (has_datetime_hint or has_format_hint):
         return False
 
     converted = pd.to_datetime(sample, format="mixed", errors="coerce")
-    success_ratio = converted.notna().mean()
-    return success_ratio >= 0.7
+    return converted.notna().mean() >= 0.7
 
 
 def clean_dataset(
@@ -74,12 +67,7 @@ def clean_dataset(
     options: dict[str, bool],
     target_column: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Apply the selected starter cleaning steps to a validated dataset.
-
-    The pipeline favors safe, explainable operations over aggressive cleaning.
-    Each step records what happened or why it was skipped so reports remain
-    auditable for demos, viva explanations, and downstream ML preparation.
-    """
+    """Apply the selected cleaning steps with safe smartphone-specific branching."""
     cleaned_df = df.copy(deep=True)
     cleaning_steps: list[str] = []
     skipped_steps: list[str] = []
@@ -90,6 +78,7 @@ def clean_dataset(
     scale_numeric_selected = options.get("scale_numeric", False)
     nlp_cleaning_selected = options.get("nlp_cleaning", False)
     scaler_choice = options.get("scaler_choice", "StandardScaler")
+
     missing_filled: dict[str, dict[str, str | int]] = {}
     converted_columns: dict[str, dict[str, str]] = {}
     converted_numeric_columns: list[str] = []
@@ -108,6 +97,7 @@ def clean_dataset(
     nlp_original_backup_columns: list[str] = []
     nlp_before_after_examples: dict[str, dict[str, str]] = {}
     ecommerce_preprocessing_applied = False
+    smartphone_preprocessing_applied = False
     cleaned_numeric_columns: list[str] = []
     extracted_feature_columns: list[str] = []
     normalized_categorical_columns: list[str] = []
@@ -121,19 +111,36 @@ def clean_dataset(
     original_numeric_columns_preserved = False
     domain_outlier_rules_applied = False
     domain_outlier_adjustments: list[dict[str, Any]] = []
+    shifted_column_fixes: list[dict[str, Any]] = []
+    noise_fixes: list[dict[str, Any]] = []
+    smartphone_columns_dropped: list[str] = []
+    scalable_numeric_feature_columns: list[str] = []
+    smartphone_validation_checks: list[dict[str, Any]] = []
 
     original_rows = len(df)
     original_columns = len(df.columns)
     missing_values_before = df.isnull().sum().to_dict()
-    original_classification = classify_columns(df, target_column=target_column)
+
+    effective_target_column = target_column
+    if (
+        detect_smartphone_dataset(df.columns)
+        and target_column is not None
+        and str(target_column).strip().lower() == "segment"
+        and target_column in df.columns
+        and df[target_column].isna().all()
+    ):
+        effective_target_column = None
+        cleaning_steps.append(
+            "Ignored the empty Segment column as a target because this smartphone dataset is prepared for content-based recommendation, not classification."
+        )
+
+    original_classification = classify_columns(df, target_column=effective_target_column)
     is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
 
     def record_skipped_step(message: str) -> None:
         cleaning_steps.append(message)
         skipped_steps.append(message)
 
-    # Validation runs upstream so the cleaning pipeline can focus on safe data
-    # transformation instead of repeating structural checks.
     if options.get("remove_duplicates", False):
         cleaned_df = cleaned_df.drop_duplicates()
         duplicates_removed = original_rows - len(cleaned_df)
@@ -149,21 +156,31 @@ def clean_dataset(
             drop_reference_columns=True,
         )
         cleaned_df = ecommerce_view
-        ecommerce_preprocessing_applied = ecommerce_metadata.get(
-            "ecommerce_preprocessing_applied",
-            False,
-        )
+        ecommerce_preprocessing_applied = ecommerce_metadata.get("ecommerce_preprocessing_applied", False)
+        smartphone_preprocessing_applied = ecommerce_metadata.get("smartphone_preprocessing_applied", False)
         cleaned_numeric_columns = ecommerce_metadata.get("cleaned_numeric_columns", [])
         extracted_feature_columns = ecommerce_metadata.get("extracted_feature_columns", [])
-        normalized_categorical_columns = ecommerce_metadata.get(
-            "normalized_categorical_columns",
-            [],
-        )
+        normalized_categorical_columns = ecommerce_metadata.get("normalized_categorical_columns", [])
         dropped_reference_columns = ecommerce_metadata.get("dropped_reference_columns", [])
         recommendation_ready = ecommerce_metadata.get("recommendation_ready", False)
         columns_excluded_from_ml = ecommerce_metadata.get("raw_source_columns_excluded_from_ml", [])
+        shifted_column_fixes = ecommerce_metadata.get("shifted_column_fixes", [])
+        noise_fixes = ecommerce_metadata.get("noise_fixes", [])
+        smartphone_columns_dropped = ecommerce_metadata.get("columns_dropped", [])
+        scalable_numeric_feature_columns = ecommerce_metadata.get("scalable_numeric_feature_columns", [])
 
-        if ecommerce_preprocessing_applied:
+        if smartphone_preprocessing_applied:
+            cleaning_steps.append(
+                "Detected the complex smartphone recommendation dataset and applied smartphone-specific feature extraction, noisy text repair, and shifted-column handling before the generic cleaning steps."
+            )
+            if smartphone_columns_dropped:
+                cleaning_steps.append(
+                    "Dropped unusable smartphone columns: "
+                    + ", ".join(sorted(set(smartphone_columns_dropped)))
+                    + "."
+                )
+            deduplication_strategy = "exact row matching plus smartphone product matching"
+        elif ecommerce_preprocessing_applied:
             cleaning_steps.append(
                 "Applied mobile e-commerce preprocessing to parse scraped numeric fields, normalize brand names, and remove reference-only URL columns from the ML-ready output."
             )
@@ -182,15 +199,11 @@ def clean_dataset(
 
     if fix_data_types_selected:
         for column in cleaned_df.columns:
-            if column == target_column:
-                # Preserve the target as-is so feature cleanup does not
-                # accidentally change the label semantics used for ML inference.
+            if column == effective_target_column:
                 continue
-
             series = cleaned_df[column]
             if not pd.api.types.is_object_dtype(series):
                 continue
-
             try:
                 if _should_convert_to_numeric(series):
                     cleaned_df[column] = pd.to_numeric(series, errors="coerce")
@@ -200,7 +213,6 @@ def clean_dataset(
                     }
                     converted_numeric_columns.append(column)
                     continue
-
                 if _should_convert_to_datetime(series, column):
                     cleaned_df[column] = pd.to_datetime(series, errors="coerce")
                     converted_columns[column] = {
@@ -213,12 +225,9 @@ def clean_dataset(
                         "Skipped because the column does not look reliably numeric or date-like."
                     )
             except Exception:
-                # Type conversion is best-effort. Skipping unsafe columns keeps
-                # the cleaning run usable instead of failing the whole dataset.
                 skipped_type_conversion_columns[column] = (
                     "Skipped because safe type conversion failed for this column."
                 )
-            continue
 
         if ecommerce_preprocessing_applied and (cleaned_numeric_columns or extracted_feature_columns):
             converted_numeric_columns = sorted(
@@ -242,8 +251,9 @@ def clean_dataset(
                 )
 
         if converted_columns:
-            converted_list = ", ".join(sorted(converted_columns.keys()))
-            cleaning_steps.append(f"Converted column data types for: {converted_list}.")
+            cleaning_steps.append(
+                "Converted column data types for: " + ", ".join(sorted(converted_columns.keys())) + "."
+            )
             cleaning_steps.append(
                 "Type conversion helps ML because numeric and datetime values are easier to validate, clean, and transform."
             )
@@ -256,7 +266,9 @@ def clean_dataset(
                     "Converted date-like text columns to datetime so time information can be handled more consistently."
                 )
         else:
-            record_skipped_step("Data type fixing was selected, but no safe column conversions were found, so this step was skipped.")
+            record_skipped_step(
+                "Data type fixing was selected, but no safe column conversions were found, so this step was skipped."
+            )
             type_conversion_notes.append("No columns met the safety threshold for type conversion.")
     else:
         cleaning_steps.append("Skipped wrong data type fixing.")
@@ -264,47 +276,41 @@ def clean_dataset(
 
     if handle_missing_values_selected:
         for column in cleaned_df.columns:
-            if column == target_column:
+            if column == effective_target_column:
                 continue
             missing_count = int(cleaned_df[column].isna().sum())
-
             if missing_count == 0:
                 continue
 
-            if pd.api.types.is_numeric_dtype(cleaned_df[column]):
-                # Median is safer than mean for dirty datasets because it is
-                # less sensitive to extreme values that may still be present.
+            if smartphone_preprocessing_applied and column in normalized_categorical_columns:
+                cleaned_df[column] = cleaned_df[column].fillna("Unknown")
+                missing_filled[column] = {
+                    "missing_count_before": missing_count,
+                    "strategy": "Unknown",
+                    "fill_value": "Unknown",
+                }
+            elif smartphone_preprocessing_applied and column in BOOLEAN_FEATURE_COLUMNS:
+                cleaned_df[column] = cleaned_df[column].fillna(0).astype(int)
+                missing_filled[column] = {
+                    "missing_count_before": missing_count,
+                    "strategy": "false/0",
+                    "fill_value": "0",
+                }
+            elif pd.api.types.is_numeric_dtype(cleaned_df[column]):
                 median_value = np.median(cleaned_df[column].dropna())
-
-                if pd.isna(median_value):
-                    cleaned_df[column] = cleaned_df[column].fillna(0)
-                    fill_value = 0
-                else:
-                    cleaned_df[column] = cleaned_df[column].fillna(median_value)
-                    fill_value = median_value
-
+                fill_value = 0 if pd.isna(median_value) else median_value
+                cleaned_df[column] = cleaned_df[column].fillna(fill_value)
                 missing_filled[column] = {
                     "missing_count_before": missing_count,
                     "strategy": "median",
                     "fill_value": str(fill_value),
                 }
             else:
-                # Mode preserves the most common category and is easier to
-                # justify than model-based imputation in a beginner workflow.
-                mode_values = cleaned_df[column].mode(dropna=True)
-
-                if not mode_values.empty:
-                    fill_value = mode_values.iloc[0]
-                    cleaned_df[column] = cleaned_df[column].fillna(fill_value)
-                    strategy = "mode"
-                else:
-                    fill_value = "Unknown"
-                    cleaned_df[column] = cleaned_df[column].fillna(fill_value)
-                    strategy = "Unknown"
-
+                fill_value = _get_mode_or_unknown(cleaned_df[column])
+                cleaned_df[column] = cleaned_df[column].fillna(fill_value)
                 missing_filled[column] = {
                     "missing_count_before": missing_count,
-                    "strategy": strategy,
+                    "strategy": "mode" if fill_value != "Unknown" else "Unknown",
                     "fill_value": str(fill_value),
                 }
 
@@ -315,57 +321,59 @@ def clean_dataset(
             )
         else:
             filled_columns = []
-            record_skipped_step("Missing value handling was selected, but no missing values were found, so this step was skipped.")
+            record_skipped_step(
+                "Missing value handling was selected, but no missing values were found, so this step was skipped."
+            )
     else:
         filled_columns = []
-        cleaning_steps.append(
-            "Missing value handling was not selected, so missing values were not changed."
-        )
+        cleaning_steps.append("Missing value handling was not selected, so missing values were not changed.")
 
     if handle_outliers_selected:
-        if ecommerce_preprocessing_applied:
+        if smartphone_preprocessing_applied:
+            cleaned_df, domain_outlier_adjustments = apply_smartphone_domain_outlier_rules(cleaned_df)
+            domain_outlier_rules_applied = True
+            if domain_outlier_adjustments:
+                cleaning_steps.append(
+                    "Applied smartphone-specific validation bounds for price, rating, battery, display, refresh rate, charging wattage, and processor speed."
+                )
+        elif ecommerce_preprocessing_applied:
             cleaned_df, domain_outlier_adjustments = apply_mobile_domain_outlier_rules(cleaned_df)
             domain_outlier_rules_applied = True
             if domain_outlier_adjustments:
                 cleaning_steps.append(
                     "Applied domain-safe outlier validation rules for mobile phone fields such as rating, battery capacity, and screen size."
                 )
-        numeric_columns = cleaned_df.select_dtypes(include=["number"]).columns
 
-        for column in numeric_columns:
-            if column == target_column:
-                # Avoid altering the supervised label distribution during
-                # feature cleaning. Target treatment is workflow-specific.
+        skip_iqr_columns = set()
+        if smartphone_preprocessing_applied:
+            skip_iqr_columns = {
+                "price",
+                "rating",
+                "battery_mah",
+                "screen_size_inches",
+                "refresh_rate_hz",
+                "charging_watt",
+                "processor_speed_ghz",
+            }
+        elif ecommerce_preprocessing_applied:
+            skip_iqr_columns = {"rating", "battery_mah", "screen_size_inches"}
+
+        for column in cleaned_df.select_dtypes(include=["number"]).columns:
+            if column == effective_target_column or column in skip_iqr_columns:
                 continue
-
             series = cleaned_df[column].dropna()
             if len(series) < 4:
                 continue
-
-            if ecommerce_preprocessing_applied and column in {"rating", "battery_mah", "screen_size_inches"}:
-                # These fields use domain-safe ranges instead of generic IQR
-                # capping so valid phone specifications are not over-cleaned.
-                continue
-
             q1 = series.quantile(0.25)
             q3 = series.quantile(0.75)
             iqr = q3 - q1
-
             if pd.isna(iqr) or iqr == 0:
                 continue
-
             lower_bound = q1 - 1.5 * iqr
             upper_bound = q3 + 1.5 * iqr
-            outlier_positions = np.where(
-                (cleaned_df[column] < lower_bound) | (cleaned_df[column] > upper_bound)
-            )[0]
-            outlier_count = int(len(outlier_positions))
-
+            outlier_count = int(((cleaned_df[column] < lower_bound) | (cleaned_df[column] > upper_bound)).sum())
             if outlier_count == 0:
                 continue
-
-            # Cap rather than drop so potentially valid rare cases are retained
-            # and row count remains stable for the learner's analysis.
             cleaned_df[column] = cleaned_df[column].clip(lower=lower_bound, upper=upper_bound)
             outlier_summary.append(
                 {
@@ -378,48 +386,54 @@ def clean_dataset(
             )
 
         if outlier_summary:
-            capped_columns = ", ".join(item["column_name"] for item in outlier_summary)
-            cleaning_steps.append(f"Capped outliers using the IQR method for: {capped_columns}.")
+            cleaning_steps.append(
+                "Capped outliers using the IQR method for: "
+                + ", ".join(item["column_name"] for item in outlier_summary)
+                + "."
+            )
             cleaning_steps.append(
                 "Outliers were capped instead of deleting rows, because extreme values should not be removed blindly."
             )
-        else:
-            record_skipped_step("Outlier handling was selected, but no numeric feature columns with detectable outliers were found, so this step was skipped.")
+        elif not domain_outlier_adjustments:
+            record_skipped_step(
+                "Outlier handling was selected, but no numeric feature columns with detectable outliers were found, so this step was skipped."
+            )
     else:
         cleaning_steps.append("Skipped outlier handling.")
 
     if encode_categorical_selected:
-        classification = classify_columns(cleaned_df, target_column=target_column)
-        detected_text_columns = set(detect_text_columns(cleaned_df, target_column=target_column))
-        # E-commerce categorical columns (brand, availability) are always safe to
-        # encode after domain normalization — bypass the text-detection filter for
-        # them so high brand-count ratios don't silently block encoding.
-        ecommerce_categorical_override = (
-            {col for col in {"brand", "availability"} if col in classification["categorical_columns"]}
-            if ecommerce_preprocessing_applied
-            else set()
-        )
+        classification = classify_columns(cleaned_df, target_column=effective_target_column)
+        detected_text_columns = set(detect_text_columns(cleaned_df, target_column=effective_target_column))
+        if smartphone_preprocessing_applied:
+            categorical_override = {
+                column
+                for column in {"brand", "processor_brand", "os_family", "price_segment"}
+                if column in classification["categorical_columns"]
+            }
+        elif ecommerce_preprocessing_applied:
+            categorical_override = {
+                column
+                for column in {"brand", "availability"}
+                if column in classification["categorical_columns"]
+            }
+        else:
+            categorical_override = set()
+
         candidate_columns = [
             column
             for column in classification["categorical_columns"]
-            if column != target_column
+            if column != effective_target_column
             and column in cleaned_df.columns
-            and (column not in detected_text_columns or column in ecommerce_categorical_override)
+            and (column not in detected_text_columns or column in categorical_override)
             and not str(column).endswith("_original")
             and column not in dropped_reference_columns
             and column not in columns_excluded_from_ml
-            and column != "product_name"
+            and column not in {"product_name", "model", "phone_id"}
         ]
 
         if candidate_columns:
             original_column_count = len(cleaned_df.columns)
-            # Free-text columns are excluded here because one-hot encoding them
-            # would explode dimensionality and produce poor features.
-            cleaned_df = pd.get_dummies(
-                cleaned_df,
-                columns=candidate_columns,
-                drop_first=False,
-            )
+            cleaned_df = pd.get_dummies(cleaned_df, columns=candidate_columns, drop_first=False)
             encoded_columns = sorted(candidate_columns)
             encoded_columns_generated_count = len(cleaned_df.columns) - original_column_count
             cleaning_steps.append(
@@ -435,19 +449,16 @@ def clean_dataset(
                 "Encoding was selected, but no categorical feature columns were found, so this step was skipped."
             )
 
-        if target_column and target_column in classification["categorical_columns"]:
-            # Keep target encoding separate from feature encoding so the app
-            # does not accidentally leak label-processing assumptions into the
-            # generic cleaning pipeline.
+        if effective_target_column and effective_target_column in classification["categorical_columns"]:
             target_encoding_recommendation = (
-                f"Target column '{target_column}' looks categorical. Keep it separate from feature "
+                f"Target column '{effective_target_column}' looks categorical. Keep it separate from feature "
                 "encoding and only encode it later if the chosen ML workflow requires it."
             )
     else:
         cleaning_steps.append("Skipped categorical encoding.")
 
     if nlp_cleaning_selected:
-        candidate_text_columns = detect_text_columns(cleaned_df, target_column=target_column)
+        candidate_text_columns = detect_text_columns(cleaned_df, target_column=effective_target_column)
         if ecommerce_preprocessing_applied:
             protected_text_columns = {
                 "product_name",
@@ -461,19 +472,26 @@ def clean_dataset(
                 "screen_size",
                 *dropped_reference_columns,
             }
+            if smartphone_preprocessing_applied:
+                protected_text_columns.update(
+                    {
+                        "model",
+                        "sim",
+                        "processor",
+                        "display",
+                        "camera",
+                        "card",
+                        "os",
+                        "combined_text_features",
+                        "extra_features",
+                    }
+                )
             candidate_text_columns = [
                 column for column in candidate_text_columns if column not in protected_text_columns
             ]
 
         if candidate_text_columns:
-            # Text cleaning stays lightweight here. The goal is to normalize raw
-            # text safely before vectorization, not to perform model-specific NLP.
-            (
-                cleaned_df,
-                cleaned_text_columns,
-                nlp_original_backup_columns,
-                nlp_before_after_examples,
-            ) = clean_text_columns(
+            cleaned_df, cleaned_text_columns, nlp_original_backup_columns, nlp_before_after_examples = clean_text_columns(
                 cleaned_df,
                 candidate_text_columns,
                 remove_numbers=True,
@@ -494,9 +512,7 @@ def clean_dataset(
             ]
             if cleaned_text_columns:
                 cleaning_steps.append(
-                    "Applied NLP cleaning to text columns: "
-                    + ", ".join(cleaned_text_columns)
-                    + "."
+                    "Applied NLP cleaning to text columns: " + ", ".join(cleaned_text_columns) + "."
                 )
                 cleaning_steps.append(
                     "Cleaned text can later be converted into numeric features using TF-IDF or Bag-of-Words."
@@ -514,22 +530,24 @@ def clean_dataset(
 
     if scale_numeric_selected:
         numeric_columns = cleaned_df.select_dtypes(include=["number"]).columns.tolist()
-        feature_numeric_columns = [column for column in numeric_columns if column != target_column]
+        if smartphone_preprocessing_applied and scalable_numeric_feature_columns:
+            feature_numeric_columns = [
+                column
+                for column in scalable_numeric_feature_columns
+                if column in numeric_columns and column != effective_target_column
+            ]
+        else:
+            feature_numeric_columns = [column for column in numeric_columns if column != effective_target_column]
 
         if feature_numeric_columns:
             try:
                 if scaler_choice == "MinMaxScaler":
                     scaler = MinMaxScaler()
                     scaler_used = "MinMaxScaler"
-                    cleaning_steps.append(
-                        "MinMaxScaler scales values into a fixed range, usually 0 to 1."
-                    )
+                    cleaning_steps.append("MinMaxScaler scales values into a fixed range, usually 0 to 1.")
                 else:
                     scaler = StandardScaler()
                     scaler_used = "StandardScaler"
-                    # Reference stats are captured before scaling so the report
-                    # can explain what "standardized" means without recomputing
-                    # values later from transformed data.
                     scaling_reference_stats = {
                         column: {
                             "mean_before_scaling": float(np.mean(cleaned_df[column])),
@@ -540,7 +558,6 @@ def clean_dataset(
                     cleaning_steps.append(
                         "StandardScaler standardizes values around mean 0 and standard deviation 1."
                     )
-
                 scaled_result = scaler.fit_transform(cleaned_df[feature_numeric_columns])
                 scaled_columns = feature_numeric_columns
                 if ecommerce_preprocessing_applied:
@@ -561,8 +578,6 @@ def clean_dataset(
                 )
             except Exception:
                 scaler_used = scaler_choice
-                # Scaling failure should not destroy the rest of the cleaning
-                # result; it is a useful but non-essential transformation.
                 record_skipped_step(
                     "Scaling was selected, but numeric scaling could not be applied safely, so this step was skipped."
                 )
@@ -575,22 +590,12 @@ def clean_dataset(
         cleaning_steps.append("Skipped numeric scaling.")
 
     missing_values_after = cleaned_df.isnull().sum().to_dict()
-    cleaned_classification = classify_columns(cleaned_df, target_column=target_column)
+    cleaned_classification = classify_columns(cleaned_df, target_column=effective_target_column)
 
-    # Capture a compact before/after view so the report can explain impact
-    # without re-running expensive profiling logic.
     before_vs_after_summary = {
         "metrics": [
-            {
-                "metric": "Row count",
-                "before": original_rows,
-                "after": len(cleaned_df),
-            },
-            {
-                "metric": "Column count",
-                "before": original_columns,
-                "after": len(cleaned_df.columns),
-            },
+            {"metric": "Row count", "before": original_rows, "after": len(cleaned_df)},
+            {"metric": "Column count", "before": original_columns, "after": len(cleaned_df.columns)},
             {
                 "metric": "Total missing values",
                 "before": int(sum(missing_values_before.values())),
@@ -614,8 +619,9 @@ def clean_dataset(
         ]
     }
 
-    # This structured summary is intentionally verbose because it powers the
-    # UI, JSON report, Flowise explanation context, and viva summary.
+    if smartphone_preprocessing_applied:
+        smartphone_validation_checks = validate_smartphone_outputs(cleaned_df)
+
     cleaning_summary = {
         "original_rows": original_rows,
         "original_columns": original_columns,
@@ -648,11 +654,17 @@ def clean_dataset(
         "scaler_used": scaler_used,
         "scaling_reference_stats": scaling_reference_stats,
         "ecommerce_preprocessing_applied": ecommerce_preprocessing_applied,
+        "smartphone_preprocessing_applied": smartphone_preprocessing_applied,
         "cleaned_numeric_columns": sorted(set(cleaned_numeric_columns)),
         "extracted_feature_columns": sorted(set(extracted_feature_columns)),
         "normalized_categorical_columns": sorted(set(normalized_categorical_columns)),
         "dropped_reference_columns": sorted(set(dropped_reference_columns)),
         "columns_excluded_from_ml": sorted(set(columns_excluded_from_ml)),
+        "shifted_column_fixes": shifted_column_fixes,
+        "noise_fixes": noise_fixes,
+        "smartphone_columns_dropped": sorted(set(smartphone_columns_dropped)),
+        "scalable_numeric_feature_columns": scalable_numeric_feature_columns,
+        "smartphone_validation_checks": smartphone_validation_checks,
         "recommendation_ready": recommendation_ready,
         "original_numeric_columns_preserved": original_numeric_columns_preserved,
         "domain_outlier_rules_applied": domain_outlier_rules_applied,
