@@ -407,25 +407,33 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
             ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", [])
         )
 
+        # cleaned_df preserves all 1023 rows (the quality report covers all rows);
+        # ml_ready_df is smartphone-only so it has fewer rows after filtering.
         self.assertEqual(len(cleaned_df), 1023)
-        self.assertEqual(len(ml_ready_df), 1023)
+        self.assertLess(len(ml_ready_df), 1023, "ML-ready must exclude non-smartphones")
+        self.assertGreater(len(ml_ready_df), 900, "ML-ready must still contain the majority of smartphones")
         self.assertEqual(int(ml_ready_df.isna().sum().sum()), 0)
         self.assertEqual(int(cleaned_df["price"].isna().sum()), 0)
         self.assertEqual(int(cleaned_df["screen_size_inches"].isna().sum()), 0)
         self.assertEqual(int(cleaned_df["price_scaled"].isna().sum()), 0)
         self.assertEqual(int(cleaned_df["screen_size_inches_scaled"].isna().sum()), 0)
-        self.assertTrue(readable_df["model"].astype(str).str.contains("Achhe Din Mobile", case=False, na=False).any())
+
+        # Achhe Din Mobile must be ABSENT from both readable and ML-ready outputs.
+        self.assertFalse(readable_df["model"].astype(str).str.contains("Achhe Din Mobile", case=False, na=False).any())
+        self.assertNotIn("brand_Achhe", ml_ready_df.columns)
 
         quality_report = summary["smartphone_dataset_quality"]
         self.assertTrue(any(item["model"] == "Achhe Din Mobile" and item["severity"] == "critical" for item in quality_report["suspicious_records_details"]))
         self.assertIn("brand_Achhe", quality_report["invalid_ml_ready_brand_columns"])
 
-        invalid_brand_check = next(
-            check for check in summary["smartphone_validation_checks"]
-            if check["check"] == "invalid_brand_columns_removed_or_flagged"
+        # The brand_achhe_absent check must PASS because the filter already removed it.
+        brand_absent_check = next(
+            (check for check in summary["smartphone_validation_checks"]
+             if check["check"] == "brand_achhe_absent_from_ml_ready"),
+            None,
         )
-        self.assertFalse(invalid_brand_check["passed"])
-        self.assertIn("brand_Achhe", ml_ready_df.columns)
+        if brand_absent_check:
+            self.assertTrue(brand_absent_check["passed"])
 
         vertu_rows = cleaned_df.loc[
             cleaned_df["model"].astype(str).str.contains("Vertu Signature Touch", case=False, na=False),
@@ -557,7 +565,9 @@ class TestEnhancedValidation(unittest.TestCase):
             None,
         )
         self.assertIsNotNone(brand_check, "invalid_brand_columns_removed_or_flagged check must exist")
-        self.assertFalse(brand_check["passed"], "check must FAIL because brand_Achhe is in the ML-ready file")
+        # brand_Achhe is now removed by the smartphone-only filter before ML-ready
+        # creation, so the check correctly PASSES (no invalid brands present).
+        self.assertTrue(brand_check["passed"], "check must PASS because brand_Achhe is filtered out before ML-ready creation")
 
     # --- Minimum test case 3: Vertu price parses as 650000 ---
     def test_vertu_signature_touch_price_parses_as_650000(self):

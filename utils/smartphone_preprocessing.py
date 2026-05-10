@@ -129,6 +129,66 @@ SCALABLE_NUMERIC_COLUMNS = [
     "memory_card_max_gb",
 ]
 
+# Brands that never produce smartphones — always excluded from ML-ready output.
+NON_SMARTPHONE_BRANDS: frozenset[str] = frozenset(["achhe", "eunity", "zanco"])
+
+# Regex patterns that, when matched in the model name, identify feature phones
+# or non-smartphone devices that must not appear in the smartphone ML-ready file.
+_NON_SMARTPHONE_MODEL_PATTERNS: list[re.Pattern[str]] = [
+    # Nokia feature / basic phone model numbers (single and flip series)
+    re.compile(r"\bnokia\s+(?:105|106|107|108|110|112|114|115|116|130|150|210|215|216|220|225|230|400|800|8210)\b", re.IGNORECASE),
+    re.compile(r"\bnokia\s+(?:2660|2720|2760|2780|3310|3720|5310|5710|6300|8000)\b", re.IGNORECASE),
+    # Samsung basic / feature phone lines
+    re.compile(r"\bsamsung\s+guru\b", re.IGNORECASE),
+    re.compile(r"\bguru\s+(?:music|gt|e[0-9])\b", re.IGNORECASE),
+    re.compile(r"\bguru\s+e1[0-9]{3}\b", re.IGNORECASE),
+    # All JioPhone variants: JioPhone 5G, JioPhone Next, JioPhone 2, etc.
+    # These are Android-based but marketed as feature / ultra-low-end phones.
+    re.compile(r"\bjiophone\b", re.IGNORECASE),
+    re.compile(r"\bjio\s+phone\b", re.IGNORECASE),
+    # Suspicious / fake brands
+    re.compile(r"\bachhe\s+din\b", re.IGNORECASE),
+    re.compile(r"\bxtouch\b", re.IGNORECASE),
+    re.compile(r"\bipod\b", re.IGNORECASE),
+    re.compile(r"\bzanco\b", re.IGNORECASE),
+    re.compile(r"\beunity\b", re.IGNORECASE),
+    # Karbonn — all models are basic/feature phones
+    re.compile(r"\bkarbonn\b", re.IGNORECASE),
+    # itel feature/basic phone lines: model-code series (it2163S etc.) and
+    # all Magic variants (Magic 2, Magic X, MagicX Pro — no trailing \b so
+    # "MagicX" is matched even without a space before the suffix)
+    re.compile(r"\bitel\s+it[0-9]+[a-z]*\b", re.IGNORECASE),
+    re.compile(r"\bitel\s+magic", re.IGNORECASE),
+    # Motorola Moto A10 — entry-level feature-like Android
+    re.compile(r"\bmoto(?:rola)?\s+(?:moto\s+)?a10\b", re.IGNORECASE),
+    # Other non-smartphone brands
+    re.compile(r"\blyf\b", re.IGNORECASE),
+    re.compile(r"\bdizo\s+star\b", re.IGNORECASE),
+    re.compile(r"\bikall\b", re.IGNORECASE),
+    re.compile(r"\bblackzone\b", re.IGNORECASE),
+]
+
+# Regex patterns indicating the display column contains non-display content.
+# Each tuple is (compiled pattern, contamination category).
+_DISPLAY_CONTAMINATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\d+\s*mah", re.IGNORECASE), "battery"),
+    (re.compile(r"\bbattery\b", re.IGNORECASE), "battery"),
+    (re.compile(r"\b\d+(?:\.\d+)?\s*mp\s+(?:rear|front)\b", re.IGNORECASE), "camera"),
+    (re.compile(r"\b(?:rear|front)\s+camera\b", re.IGNORECASE), "camera"),
+    (re.compile(r"\bno\s+rear\s+camera\b", re.IGNORECASE), "camera"),
+    (re.compile(r"\bmemory\s+card\b", re.IGNORECASE), "storage"),
+    (re.compile(r"\bupto\s+\d+\s*(?:gb|mb)\b", re.IGNORECASE), "storage"),
+    (re.compile(r"\bios\s+v\d+\b", re.IGNORECASE), "os"),
+    (re.compile(r"\bandroid\s+\d+\b", re.IGNORECASE), "os"),
+]
+
+# Patterns matching high-end foldable / rugged smartphones that may have
+# OS_family = "Other" due to column shift but are clearly not feature phones.
+_HIGH_END_FOLDABLE_PATTERN: re.Pattern[str] = re.compile(
+    r"\bgalaxy\s+z\b|\bfind\s+n\b|\bfind\s+x\b|\bcat\s+s[0-9]\b|\broyole\b",
+    re.IGNORECASE,
+)
+
 
 def normalize_smartphone_column_name(name: Any) -> str:
     """Normalize column names while preserving semantic intent."""
@@ -346,6 +406,172 @@ def _fix_shifted_columns(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, list[di
     return fixed_df, fixes
 
 
+def parse_price_safely(value: Any) -> float | None:
+    """Parse a single raw price string into a float, preserving high values."""
+    result = _extract_price(pd.Series([value]))
+    v = result.iloc[0]
+    return float(v) if pd.notna(v) else None
+
+
+def extract_screen_size_inches(display_text: Any) -> float | None:
+    """Extract screen size from a display specification string.
+
+    Handles 'inch', 'inches', and the double-quote inch symbol so that
+    values like '1.77 inches', '6.7 inches', and '8.03"' are all captured.
+    Never silently returns NaN for valid inch patterns.
+    """
+    return _extract_numeric_token(display_text, r'(\d+(?:\.\d+)?)\s*(?:inch(?:es)?|")')
+
+
+def _detect_display_contamination(display_text: str | None) -> str | None:
+    """Return the contamination category if display contains non-display content."""
+    text = _text_or_none(display_text)
+    if not text:
+        return None
+    for pattern, category in _DISPLAY_CONTAMINATION_PATTERNS:
+        if pattern.search(text):
+            return category
+    return None
+
+
+def validate_column_semantics(dataframe: pd.DataFrame) -> dict[str, Any]:
+    """Detect cross-column contamination in the key smartphone specification columns.
+
+    Returns a structured summary with per-category contamination lists and counts
+    so the cleaning report can explain exactly which rows had wrong column values.
+    """
+    display_contamination: list[dict[str, Any]] = []
+
+    if "display" in dataframe.columns:
+        for index, row in dataframe.iterrows():
+            display_val = _text_or_none(row.get("display"))
+            contamination_type = _detect_display_contamination(display_val)
+            if contamination_type:
+                display_contamination.append(
+                    {
+                        "row_index": int(index),
+                        "model": _text_or_none(row.get("model")) or "Unknown",
+                        "display_value": display_val,
+                        "contamination_type": contamination_type,
+                    }
+                )
+
+    return {
+        "display_contaminated_rows": display_contamination,
+        "display_contaminated_count": len(display_contamination),
+        "total_contaminated_rows": len(display_contamination),
+        "contamination_by_type": {
+            "battery": sum(1 for r in display_contamination if r["contamination_type"] == "battery"),
+            "camera": sum(1 for r in display_contamination if r["contamination_type"] == "camera"),
+            "storage": sum(1 for r in display_contamination if r["contamination_type"] == "storage"),
+            "os": sum(1 for r in display_contamination if r["contamination_type"] == "os"),
+        },
+    }
+
+
+def detect_non_smartphone_records(dataframe: pd.DataFrame) -> pd.Series:
+    """Return a boolean mask: True for rows that are not smartphones.
+
+    Uses brand exclusion, explicit model keyword patterns, and a combined
+    OS-family + price heuristic that keeps high-end foldables whose OS field
+    was not cleanly extracted.
+    """
+    mask = pd.Series(False, index=dataframe.index)
+
+    model_col = (
+        dataframe["model"].fillna("") if "model" in dataframe.columns
+        else pd.Series("", index=dataframe.index)
+    )
+    brand_col = (
+        dataframe["brand"].fillna("").str.lower() if "brand" in dataframe.columns
+        else pd.Series("", index=dataframe.index)
+    )
+    os_col = (
+        dataframe["os_family"].fillna("") if "os_family" in dataframe.columns
+        else pd.Series("", index=dataframe.index)
+    )
+    price_col = (
+        pd.to_numeric(dataframe["price"], errors="coerce") if "price" in dataframe.columns
+        else pd.Series(float("nan"), index=dataframe.index)
+    )
+    screen_col = (
+        pd.to_numeric(dataframe["screen_size_inches"], errors="coerce") if "screen_size_inches" in dataframe.columns
+        else pd.Series(float("nan"), index=dataframe.index)
+    )
+
+    # Brand-based hard exclusion (achhe, eunity, zanco always excluded)
+    mask |= brand_col.isin(NON_SMARTPHONE_BRANDS)
+
+    # Explicit model name keyword exclusion
+    for pattern in _NON_SMARTPHONE_MODEL_PATTERNS:
+        mask |= model_col.str.contains(pattern, na=False)
+
+    # OS-family heuristic: no smartphone OS AND price below 12 000 AND not a
+    # known high-end foldable whose OS column was corrupted during scraping.
+    is_non_smartphone_os = os_col == "Other"
+    is_low_price = price_col.fillna(0) < 12000
+    is_high_end_foldable = model_col.str.contains(_HIGH_END_FOLDABLE_PATTERN, na=False)
+    mask |= is_non_smartphone_os & is_low_price & ~is_high_end_foldable
+
+    # Small screen AND no smartphone OS is a strong feature-phone indicator.
+    mask |= (screen_col < 3.5).fillna(False) & is_non_smartphone_os
+
+    return mask
+
+
+def flag_price_outliers(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Add is_price_outlier and is_high_end_luxury_phone flag columns.
+
+    Prices above 500 000 PKR are preserved (not nulled) and flagged so that
+    luxury phones like Vertu Signature Touch remain in the dataset with
+    their original parsed price intact.
+    """
+    result = dataframe.copy(deep=True)
+    price_series = (
+        pd.to_numeric(result["price"], errors="coerce") if "price" in result.columns
+        else pd.Series(float("nan"), index=result.index)
+    )
+    luxury_mask = (price_series > 500000).fillna(False)
+    result["is_price_outlier"] = luxury_mask.astype(int)
+    result["is_high_end_luxury_phone"] = luxury_mask.astype(int)
+    return result
+
+
+def create_smartphone_only_dataset(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Remove non-smartphone records and return the filtered dataframe with a summary.
+
+    All logic is rule-based and reproducible: the same rules apply every time
+    a dataset is uploaded without manual post-processing of the output CSV.
+    """
+    non_smartphone_mask = detect_non_smartphone_records(dataframe)
+    removed_df = dataframe[non_smartphone_mask]
+    filtered_df = dataframe[~non_smartphone_mask].reset_index(drop=True)
+
+    removed_records: list[dict[str, Any]] = []
+    for index, row in removed_df.iterrows():
+        price_raw = pd.to_numeric(pd.Series([row.get("price")]), errors="coerce").iloc[0]
+        screen_raw = pd.to_numeric(pd.Series([row.get("screen_size_inches")]), errors="coerce").iloc[0]
+        removed_records.append(
+            {
+                "row_index": int(index),
+                "model": _text_or_none(row.get("model")) or "Unknown",
+                "brand": _text_or_none(row.get("brand")) or "Unknown",
+                "price": float(price_raw) if pd.notna(price_raw) else None,
+                "os_family": _text_or_none(row.get("os_family")) or "Unknown",
+                "screen_size_inches": float(screen_raw) if pd.notna(screen_raw) else None,
+            }
+        )
+
+    summary: dict[str, Any] = {
+        "total_rows_before_smartphone_filter": len(dataframe),
+        "non_smartphone_rows_removed": len(removed_df),
+        "smartphone_rows_after_filter": len(filtered_df),
+        "removed_model_names": sorted({r["model"] for r in removed_records}),
+        "removed_records": removed_records,
+    }
+    return filtered_df, summary
+
+
 def _extract_numeric_token(text: str | None, pattern: str, *, flags: int = re.IGNORECASE) -> float | None:
     if not text:
         return None
@@ -545,6 +771,12 @@ def build_smartphone_preprocessed_view(
     for required_column in ["model", "price", "rating", "sim", "processor", "ram", "battery", "display", "camera", "card", "os"]:
         if required_column not in smartphone_df.columns:
             smartphone_df[required_column] = pd.NA
+
+    # Preserve raw source column values for audit before any cleaning modifies them.
+    for _raw_col in ["price", "display", "battery", "camera", "os"]:
+        if _raw_col in smartphone_df.columns:
+            smartphone_df[f"raw_{_raw_col}"] = smartphone_df[_raw_col]
+
     smartphone_df, noise_fixes = _clean_all_known_text_columns(smartphone_df)
     smartphone_df, shifted_fixes = _fix_shifted_columns(smartphone_df)
 
@@ -578,7 +810,10 @@ def build_smartphone_preprocessed_view(
     smartphone_df["charging_watt"] = smartphone_df["battery"].map(lambda value: _extract_numeric_token(value, r"(\d+(?:\.\d+)?)\s*w"))
     smartphone_df["has_fast_charging"] = smartphone_df["battery"].fillna("").str.contains("fast charging|charging|turbo charge", case=False, regex=True).astype(int)
 
-    smartphone_df["screen_size_inches"] = smartphone_df["display"].map(lambda value: _extract_numeric_token(value, r"(\d+(?:\.\d+)?)\s*inches"))
+    # Use the updated extractor that handles inch/inches/" so small values like
+    # "1.77 inches" and quoted values are never silently converted to NaN.
+    smartphone_df["screen_size_inches"] = smartphone_df["display"].map(extract_screen_size_inches)
+    smartphone_df["display_contamination_type"] = smartphone_df["display"].map(_detect_display_contamination)
     smartphone_df["resolution_width"] = smartphone_df["display"].map(lambda value: _extract_numeric_token(value, r"(\d+)\s*x\s*\d+\s*px"))
     smartphone_df["resolution_height"] = smartphone_df["display"].map(lambda value: _extract_numeric_token(value, r"\d+\s*x\s*(\d+)\s*px"))
     smartphone_df["refresh_rate_hz"] = smartphone_df["display"].map(lambda value: _extract_numeric_token(value, r"(\d+(?:\.\d+)?)\s*hz"))
@@ -668,6 +903,12 @@ def build_smartphone_preprocessed_view(
                 "combined_text_features",
                 "os_version",
                 "phone_id",
+                "raw_price",
+                "raw_display",
+                "raw_battery",
+                "raw_camera",
+                "raw_os",
+                "display_contamination_type",
             ],
             "smartphone_feature_columns": extracted_features + boolean_columns + categorical_columns + ["combined_text_features", "phone_id"],
         }
@@ -699,8 +940,13 @@ def apply_smartphone_domain_outlier_rules(
 
     if "price" in adjusted_df.columns:
         _invalidate_by_rule("price", "price must be positive", adjusted_df["price"] <= 0)
-        premium_price_mask = adjusted_df["price"] > 500000
-        premium_price_rows = int(premium_price_mask.fillna(False).sum())
+        premium_price_mask = (adjusted_df["price"] > 500000).fillna(False)
+        premium_price_rows = int(premium_price_mask.sum())
+        # Preserve the original parsed price — do NOT null it. Add flag columns
+        # so Vertu Signature Touch (650 000 PKR) and similar luxury devices
+        # remain usable in the dataset with their actual price intact.
+        adjusted_df["is_price_outlier"] = premium_price_mask.astype(int)
+        adjusted_df["is_high_end_luxury_phone"] = premium_price_mask.astype(int)
         if premium_price_rows > 0:
             adjustments.append(
                 {
@@ -899,6 +1145,11 @@ def validate_smartphone_dataset_quality(
 
     critical_count = sum(1 for item in suspicious_records_details if item["severity"] == "critical")
 
+    # Semantic column validation (display contamination, non-smartphone detection)
+    semantic_validation = validate_column_semantics(dataframe)
+    non_smartphone_mask = detect_non_smartphone_records(dataframe)
+    non_smartphone_count = int(non_smartphone_mask.sum())
+
     data_validity_report: dict[str, Any] = {
         "input_row_count": len(dataframe),
         "final_row_count": len(dataframe) - rows_removed,
@@ -936,6 +1187,9 @@ def validate_smartphone_dataset_quality(
                 1 for item in suspicious_records_details
                 if any("display column contains" in r for r in item["reasons"])
             ),
+            "semantic_contamination_count": semantic_validation["display_contaminated_count"],
+            "contamination_by_type": semantic_validation["contamination_by_type"],
+            "contaminated_rows_sample": semantic_validation["display_contaminated_rows"][:10],
         },
         "camera_validation": {
             "rows_with_camera_column_issues": sum(
@@ -969,6 +1223,20 @@ def validate_smartphone_dataset_quality(
                 if any("feature-phone-like" in r for r in item["reasons"])
             ),
         },
+        "smartphone_filtering_summary": {
+            "non_smartphone_records_detected": non_smartphone_count,
+            "will_be_removed_from_ml_ready": non_smartphone_count,
+            "detection_method": "brand exclusion + model keyword patterns + OS/price heuristic",
+        },
+        "semantic_validation_summary": semantic_validation,
+        "suspicious_records_summary": {
+            "critical_suspicious_records": [
+                item for item in suspicious_records_details if item["severity"] == "critical"
+            ],
+            "warning_suspicious_records_count": sum(
+                1 for item in suspicious_records_details if item["severity"] == "warning"
+            ),
+        },
         "strict_mode_enabled": normalized_mode == "strict",
         "rows_removed_in_strict_mode": rows_removed,
         "final_dataset_status": (
@@ -987,13 +1255,31 @@ def validate_smartphone_dataset_quality(
         "invalid_ml_ready_brand_columns": invalid_ml_ready_brand_columns,
         "rows_removed_in_strict_mode": rows_removed,
         "strict_mode_applied": normalized_mode == "strict",
+        "smartphone_filtering_summary": data_validity_report["smartphone_filtering_summary"],
+        "semantic_validation_summary": semantic_validation,
+        "suspicious_records_summary": data_validity_report["suspicious_records_summary"],
         "data_validity_report": data_validity_report,
     }
     return validated_df, quality_report
 
 
 def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Create the readable and ML-ready smartphone recommendation datasets."""
+    """Create the readable and ML-ready smartphone recommendation datasets.
+
+    Smartphone-only filtering is applied first so that feature phones, iPods,
+    suspicious records (e.g. Achhe Din Mobile), and non-smartphone devices
+    never appear in either output file. The filtering summary is stored in
+    ml_ready_df.attrs so the caller can surface it in the cleaning report.
+    """
+    # --- Step 1: Remove non-smartphones before any output is generated. ---
+    smartphone_df, filtering_summary = create_smartphone_only_dataset(dataframe)
+
+    # --- Step 2: Add price outlier flags (Vertu etc.) before outlier rules. ---
+    smartphone_df = flag_price_outliers(smartphone_df)
+
+    # Raw audit columns shown in the readable file but excluded from ML features.
+    raw_audit_columns = [c for c in ["raw_price", "raw_display", "raw_battery", "raw_camera", "raw_os", "display_contamination_type"] if c in smartphone_df.columns]
+
     readable_priority_columns = [
         "phone_id",
         "model",
@@ -1031,13 +1317,17 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
         "memory_card_supported",
         "memory_card_hybrid",
         "memory_card_max_gb",
+        "is_price_outlier",
+        "is_high_end_luxury_phone",
         "os_family",
         "os_version",
         "combined_text_features",
         "extra_features",
     ]
-    readable_columns = [column for column in readable_priority_columns if column in dataframe.columns]
-    readable_df = dataframe[readable_columns].copy(deep=True)
+    readable_columns = [column for column in readable_priority_columns if column in smartphone_df.columns]
+    # Append raw audit columns at the end for human inspection.
+    readable_columns += [c for c in raw_audit_columns if c not in readable_columns]
+    readable_df = smartphone_df[readable_columns].copy(deep=True)
 
     def _restore_readable_category(
         target_column: str,
@@ -1046,11 +1336,11 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     ) -> None:
         if target_column in readable_df.columns:
             return
-        encoded_columns = sorted(column for column in dataframe.columns if column.startswith(encoded_prefix))
+        encoded_columns = sorted(column for column in smartphone_df.columns if column.startswith(encoded_prefix))
         if not encoded_columns:
             return
 
-        encoded_frame = dataframe[encoded_columns].apply(pd.to_numeric, errors="coerce").fillna(0)
+        encoded_frame = smartphone_df[encoded_columns].apply(pd.to_numeric, errors="coerce").fillna(0)
         restored_values = encoded_frame.idxmax(axis=1).str.replace(encoded_prefix, "", regex=False)
         insert_position = min(
             readable_priority_columns.index(target_column),
@@ -1069,7 +1359,13 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
                 pd.to_numeric(readable_df[column], errors="coerce").fillna(0).astype(int).astype(bool)
             )
 
-    ml_ready_base = dataframe.copy(deep=True)
+    # Columns that should never appear in the ML-ready feature matrix.
+    _ml_exclude = set(
+        raw_audit_columns
+        + ["display_contamination_type", "raw_price", "raw_display", "raw_battery", "raw_camera", "raw_os"]
+    )
+
+    ml_ready_base = smartphone_df.copy(deep=True)
     scalable_columns_present = [column for column in SCALABLE_NUMERIC_COLUMNS if column in ml_ready_base.columns]
 
     # The readable smartphone dataset preserves human-friendly numeric values,
@@ -1109,10 +1405,11 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     scaled_columns = [f"{column}_scaled" for column in SCALABLE_NUMERIC_COLUMNS if f"{column}_scaled" in ml_ready_base.columns]
     boolean_columns = [column for column in BOOLEAN_FEATURE_COLUMNS if column in ml_ready_base.columns]
     categorical_encoded_columns = [
-        column for column in ml_ready_base.columns if column.startswith(encoded_prefixes)
+        column for column in ml_ready_base.columns
+        if column.startswith(encoded_prefixes) and column not in _ml_exclude
     ]
     ml_ready_columns = required_base_columns + scaled_columns + boolean_columns + sorted(categorical_encoded_columns)
-    ml_ready_columns = [column for column in ml_ready_columns if column in ml_ready_base.columns]
+    ml_ready_columns = [column for column in ml_ready_columns if column in ml_ready_base.columns and column not in _ml_exclude]
     ml_ready_df = ml_ready_base[ml_ready_columns].copy(deep=True)
     for column in ml_ready_df.columns:
         if str(ml_ready_df[column].dtype) == "bool":
@@ -1146,7 +1443,14 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     ]
     if constant_feature_columns:
         ml_ready_df = ml_ready_df.drop(columns=constant_feature_columns)
+
     ml_ready_df.attrs["constant_features_dropped_from_ml_ready"] = constant_feature_columns
+    ml_ready_df.attrs["smartphone_filtering_summary"] = filtering_summary
+    ml_ready_df.attrs["final_ml_ready_columns"] = list(ml_ready_df.columns)
+    ml_ready_df.attrs["invalid_ml_ready_columns_detected"] = [
+        c for c in ml_ready_df.columns
+        if c.startswith("brand_") and c.replace("brand_", "").lower() in NON_SMARTPHONE_BRANDS
+    ]
     return readable_df, ml_ready_df
 
 
@@ -1266,6 +1570,22 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
             "invalid_brand_columns_removed_or_flagged",
             not invalid_brand_columns,
             "invalid suspicious brand columns such as brand_Achhe should not survive in a strict ML-ready export",
+        )
+        non_smartphone_brand_columns = [
+            column
+            for column in ml_ready_df.columns
+            if column.startswith("brand_") and column.replace("brand_", "").lower() in NON_SMARTPHONE_BRANDS
+        ]
+        _record(
+            "brand_achhe_absent_from_ml_ready",
+            not non_smartphone_brand_columns,
+            "brand_Achhe and other non-smartphone brand columns must be absent from the ML-ready dataset after smartphone-only filtering",
+        )
+        filtering_summary = ml_ready_df.attrs.get("smartphone_filtering_summary", {})
+        _record(
+            "smartphone_only_filter_applied",
+            filtering_summary.get("non_smartphone_rows_removed", 0) >= 0,
+            f"smartphone-only filter removed {filtering_summary.get('non_smartphone_rows_removed', 'N/A')} non-smartphone rows from the ML-ready dataset",
         )
 
     _record("records_preserved", len(dataframe) > 0, "cleaned dataset should preserve smartphone records")

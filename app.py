@@ -1371,6 +1371,14 @@ def render_cleaning_results(
             file_name=cleaned_csv_name,
             mime="text/csv",
         )
+        full_audit_dataset = cleaning_summary.get("full_audit_dataset")
+        if isinstance(full_audit_dataset, pd.DataFrame):
+            st.download_button(
+                "Download Full Audit Dataset (unfiltered, includes non-smartphones)",
+                data=full_audit_dataset.to_csv(index=False).encode("utf-8"),
+                file_name=cleaning_summary.get("full_audit_csv_name", "cleaned_full_audit_dataset.csv"),
+                mime="text/csv",
+            )
     else:
         st.download_button(
             "Download Cleaned CSV",
@@ -1393,8 +1401,11 @@ def render_cleaning_results(
             mime="text/markdown",
         )
     st.success(f"Cleaned CSV saved to: {cleaned_csv_path}")
-    if cleaning_summary.get("readable_cleaned_csv_path"):
-        st.success(f"Human-readable cleaned CSV saved to: {cleaning_summary['readable_cleaned_csv_path']}")
+    if cleaning_summary.get("full_audit_csv_path"):
+        st.success(f"Full audit CSV (unfiltered, all rows) saved to: {cleaning_summary['full_audit_csv_path']}")
+    readable_saved_path = cleaning_summary.get("readable_cleaned_csv_path")
+    if readable_saved_path and readable_saved_path != str(cleaned_csv_path):
+        st.success(f"Human-readable cleaned CSV saved to: {readable_saved_path}")
     if cleaning_summary.get("ml_ready_csv_path"):
         st.success(f"ML-ready CSV saved to: {cleaning_summary['ml_ready_csv_path']}")
     st.success(f"Cleaning report saved to: {cleaning_report_path}")
@@ -1523,9 +1534,19 @@ def render_uploaded_dataset(
             if cleaning_summary.get("ecommerce_preprocessing_applied"):
                 readable_dataset, ml_ready_dataset = build_ecommerce_output_datasets(cleaned_df)
                 if cleaning_summary.get("smartphone_preprocessing_applied"):
-                    readable_csv_name = "cleaned_readable_smartphone_dataset.csv"
+                    readable_csv_name = "cleaned_smartphone_only_dataset.csv"
                     ml_ready_csv_name = "ml_ready_smartphone_recommendation_dataset.csv"
+                    # Save the full unfiltered dataframe as a separate audit file.
+                    audit_csv_name = "cleaned_full_audit_dataset.csv"
+                    audit_csv_path = Path("output") / audit_csv_name
+                    cleaned_df.to_csv(audit_csv_path, index=False)
+                    cleaning_summary["full_audit_dataset"] = cleaned_df
+                    cleaning_summary["full_audit_csv_name"] = audit_csv_name
+                    cleaning_summary["full_audit_csv_path"] = str(audit_csv_path)
                     dataset_to_save_as_cleaned = readable_dataset
+                    # Override cleaned CSV name/path so the main output is smartphone-only.
+                    cleaned_csv_name = readable_csv_name
+                    cleaned_csv_path = Path("output") / cleaned_csv_name
                 else:
                     readable_csv_name = f"cleaned_readable_{make_safe_stem(uploaded_file.name)}.csv"
                     ml_ready_csv_name = f"ml_ready_{make_safe_stem(uploaded_file.name)}.csv"
@@ -1551,7 +1572,19 @@ def render_uploaded_dataset(
                 cleaning_summary["constant_features_dropped_from_ml_ready"] = list(
                     ml_ready_dataset.attrs.get("constant_features_dropped_from_ml_ready", [])
                 )
-                cleaning_summary["rows_removed_total"] = cleaning_summary["original_rows"] - len(cleaned_df)
+                # Smartphone-only filtering summary stored in ml_ready attrs by
+                # build_smartphone_output_datasets so it survives to the report.
+                if ml_ready_dataset.attrs.get("smartphone_filtering_summary"):
+                    cleaning_summary["smartphone_filtering_summary"] = ml_ready_dataset.attrs["smartphone_filtering_summary"]
+                if ml_ready_dataset.attrs.get("final_ml_ready_columns"):
+                    cleaning_summary["final_ml_ready_columns"] = ml_ready_dataset.attrs["final_ml_ready_columns"]
+                if ml_ready_dataset.attrs.get("invalid_ml_ready_columns_detected") is not None:
+                    cleaning_summary["invalid_ml_ready_columns_detected"] = ml_ready_dataset.attrs["invalid_ml_ready_columns_detected"]
+                _filtered_len = len(readable_dataset) if cleaning_summary.get("smartphone_preprocessing_applied") else len(cleaned_df)
+                cleaning_summary["rows_removed_total"] = cleaning_summary["original_rows"] - _filtered_len
+                cleaning_summary["final_rows"] = _filtered_len
+                if cleaning_summary.get("smartphone_preprocessing_applied"):
+                    cleaning_summary["final_columns"] = len(readable_dataset.columns)
                 if not cleaning_summary.get("row_removal_reasons"):
                     cleaning_summary["row_removal_reasons"] = [
                         {
@@ -1580,7 +1613,7 @@ def render_uploaded_dataset(
 
         # Persist all cleaning outputs so that download-button reruns do not
         # reset the UI. Everything written here survives subsequent reruns.
-        st.session_state["cleaned_df"] = cleaned_df
+        st.session_state["cleaned_df"] = dataset_to_save_as_cleaned
         st.session_state["cleaning_summary"] = cleaning_summary
         st.session_state["cleaning_report"] = cleaning_report
         st.session_state["cleaned_csv_name"] = cleaned_csv_name

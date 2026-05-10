@@ -22,6 +22,8 @@ from utils.smartphone_preprocessing import (
     detect_smartphone_dataset,
     validate_smartphone_dataset_quality,
     validate_smartphone_outputs,
+    validate_column_semantics,
+    detect_non_smartphone_records,
 )
 
 
@@ -753,6 +755,9 @@ def clean_dataset(
         "smartphone_dataset_quality": smartphone_dataset_quality,
         "suspicious_records_details": smartphone_dataset_quality.get("suspicious_records_details", []),
         "invalid_ml_ready_brand_columns": smartphone_dataset_quality.get("invalid_ml_ready_brand_columns", []),
+        "smartphone_filtering_summary": smartphone_dataset_quality.get("smartphone_filtering_summary", {}),
+        "semantic_validation_summary": smartphone_dataset_quality.get("semantic_validation_summary", {}),
+        "suspicious_records_summary": smartphone_dataset_quality.get("suspicious_records_summary", {}),
         "row_removal_reasons": row_removal_reasons,
         "recommendation_ready": recommendation_ready,
         "original_numeric_columns_preserved": original_numeric_columns_preserved,
