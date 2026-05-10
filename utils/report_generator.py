@@ -160,6 +160,7 @@ def generate_cleaning_report(
         "boolean_columns_detected": profile.get("boolean_columns", []),
         "id_like_columns_detected": profile.get("id_like_columns", []),
         "reference_columns_detected": profile.get("reference_columns", []),
+        "ignored_columns_detected": profile.get("ignored_columns", []),
         "validation_errors": validation_result.get("errors", []),
         "validation_warnings": validation_result.get("warnings", []),
         "columns_encoded": encoded_columns,

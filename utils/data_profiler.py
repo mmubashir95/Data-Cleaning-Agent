@@ -23,6 +23,7 @@ from utils.ecommerce_preprocessing import (
     is_reference_column,
     normalize_column_name,
 )
+from utils.smartphone_preprocessing import detect_smartphone_dataset
 
 
 def _normalize_boolean_token(value: Any) -> str:
@@ -137,6 +138,14 @@ def _is_id_like(series: pd.Series, column_name: str, row_count: int) -> bool:
     )
 
 
+def _ignored_column_reason(column_name: str, *, smartphone_dataset: bool) -> str:
+    """Explain why a fully empty column is excluded from profiling output."""
+    normalized_name = normalize_column_name(column_name)
+    if smartphone_dataset and normalized_name == "segment":
+        return "Segment is empty and not usable as a target column or recommendation feature."
+    return "Column is fully empty and is excluded from typed feature lists."
+
+
 def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict[str, Any]:
     """Classify dataset columns into reusable semantic groups.
 
@@ -172,6 +181,7 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
         "boolean_columns": [],
         "id_like_columns": [],
         "reference_columns": [],
+        "ignored_columns": [],
         "target_column": target_column,
     }
 
@@ -179,11 +189,30 @@ def classify_columns(df: pd.DataFrame, target_column: str | None = None) -> dict
         return classification
 
     is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
+    is_smartphone_dataset = detect_smartphone_dataset(df.columns)
     ecommerce_view, ecommerce_metadata = build_ecommerce_preprocessed_view(df)
 
     for column in df.columns:
-        series = ecommerce_view[column] if column in ecommerce_view.columns else df[column]
         normalized_name = normalize_column_name(column)
+        raw_series = df[column]
+
+        # Fully empty columns should be reported as ignored instead of being
+        # assigned a semantic feature type. This keeps the profile consistent
+        # with downstream cleaning decisions, especially for the empty Segment
+        # column in the smartphone recommendation dataset.
+        if raw_series.dropna().empty:
+            classification["ignored_columns"].append(
+                {
+                    "column": column,
+                    "reason": _ignored_column_reason(
+                        column,
+                        smartphone_dataset=is_smartphone_dataset,
+                    ),
+                }
+            )
+            continue
+
+        series = ecommerce_view[column] if column in ecommerce_view.columns else raw_series
 
         if is_ecommerce_dataset and is_reference_column(column):
             classification["reference_columns"].append(column)

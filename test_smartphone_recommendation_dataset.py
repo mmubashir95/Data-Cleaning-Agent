@@ -7,6 +7,7 @@ import unittest
 import pandas as pd
 
 from utils.data_cleaner import clean_dataset
+from utils.data_profiler import profile_dataset
 from utils.ecommerce_preprocessing import build_ecommerce_output_datasets, build_ecommerce_preprocessed_view
 from utils.ml_recommender import recommend_ml_approach
 from utils.report_generator import generate_cleaning_report
@@ -139,9 +140,17 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
 
     def test_recommendation_and_report_switch_to_smartphone_explanation(self):
         df = _smartphone_df()
+        profile = profile_dataset(df)
+        self.assertNotIn("Segment", profile["numeric_columns"])
+        self.assertNotIn("Segment", profile["categorical_columns"])
+        self.assertNotIn("Segment", profile["text_columns"])
+        self.assertEqual(profile["ignored_columns"][0]["column"], "Segment")
+        self.assertIn("not usable as a target column", profile["ignored_columns"][0]["reason"])
+
         recommendation = recommend_ml_approach(df, None, "Auto-detect", text_columns=[])
         self.assertEqual(recommendation["recommended_problem_type"], "Smartphone Content-Based Recommendation")
         self.assertTrue(recommendation["smartphone_dataset_detected"])
+        self.assertEqual(recommendation["target_detection_metadata"]["top_suggestions"], [])
         self.assertIsNone(recommendation["target_column_used_for_inference"])
         self.assertEqual(
             recommendation["algorithm_recommendation"]["target_variable_type"],

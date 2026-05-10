@@ -872,6 +872,14 @@ def render_data_quality_report(profile: dict, ml_recommendation: dict) -> None:
         st.write(f"Boolean Columns: {ml_recommendation['boolean_columns']}")
         st.write(f"Datetime Columns: {ml_recommendation['datetime_columns']}")
         st.write(f"ID-like Columns: {ml_recommendation['id_like_columns']}")
+        ignored_columns = profile.get("ignored_columns", [])
+        if ignored_columns:
+            st.write(
+                "Dropped/Ignored Columns:",
+                [entry["column"] for entry in ignored_columns],
+            )
+            for entry in ignored_columns:
+                st.write(f"Dropped/Ignored Reason: {entry['reason']}")
         st.write(f"Recommendation Ready: {ml_recommendation.get('recommendation_ready', False)}")
         st.write("Top target suggestions:", ml_recommendation["target_detection_metadata"].get("top_suggestions", []))
 
