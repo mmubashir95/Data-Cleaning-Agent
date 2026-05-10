@@ -10,7 +10,11 @@ from pandas.api.types import is_numeric_dtype
 from utils.data_profiler import classify_columns
 from utils.ecommerce_preprocessing import detect_mobile_ecommerce_dataset
 from utils.nlp_cleaner import detect_text_columns
-from utils.smartphone_preprocessing import detect_smartphone_dataset
+from utils.smartphone_preprocessing import (
+    count_smartphone_dataset_column_matches,
+    detect_smartphone_dataset,
+    get_smartphone_dataset_matched_columns,
+)
 
 CLASSIFICATION_TARGET_HINTS = {
     "target",
@@ -413,6 +417,17 @@ def _confidence_from_score(score: int) -> str:
     return "Low"
 
 
+def _smartphone_detection_confidence(columns: list[str] | pd.Index) -> tuple[str, int, list[str]]:
+    """Return smartphone detection confidence based on matched schema columns."""
+    matched_count = count_smartphone_dataset_column_matches(columns)
+    matched_columns = get_smartphone_dataset_matched_columns(columns)
+    if matched_count >= 8:
+        return "High", matched_count, matched_columns
+    if matched_count >= 5:
+        return "Medium", matched_count, matched_columns
+    return "Low", matched_count, matched_columns
+
+
 def _is_unknown_dataset(column_types: dict[str, Any], row_count: int) -> bool:
     """Detect cases where problem-type inference would be mostly guesswork."""
     feature_columns = (
@@ -627,6 +642,7 @@ def recommend_ml_approach(
     column_types = classify_columns(df, target_column=target_column)
     is_ecommerce_dataset = detect_mobile_ecommerce_dataset(df.columns)
     is_smartphone_dataset = detect_smartphone_dataset(df.columns)
+    smartphone_confidence, smartphone_match_count, smartphone_matched_columns = _smartphone_detection_confidence(df.columns)
     warnings: list[str] = []
     candidate_text_columns = detect_text_columns(df, target_column=target_column)
     detected_text_column = _looks_like_main_nlp_text_feature(df, candidate_text_columns)
@@ -693,8 +709,9 @@ def recommend_ml_approach(
     if is_smartphone_dataset and target_used is None and problem_type == "Auto-detect":
         recommended_problem_type = "Smartphone Content-Based Recommendation"
         reason = (
-            "This is a complex smartphone e-commerce dataset with an empty Segment column and no user history target, "
-            "so it should be prepared for content-based recommendation using cosine similarity instead of classification or regression."
+            "The dataset contains multiple smartphone-specific columns such as "
+            + ", ".join(smartphone_matched_columns)
+            + ". The Segment column is empty and there is no user history target, so the dataset should be prepared for content-based recommendation using cosine similarity instead of classification or regression."
         )
     elif problem_type != "Auto-detect":
         # Manual selection wins over heuristics because user intent is more
@@ -750,10 +767,16 @@ def recommend_ml_approach(
         "warnings": warnings,
         "selected_target_column": target_column,
         "suggested_target_column": suggested_target_column,
-        "target_detection_confidence": suggestion_confidence if suggested_target_column else "Low",
+        "target_detection_confidence": (
+            smartphone_confidence
+            if recommended_problem_type == "Smartphone Content-Based Recommendation"
+            else (suggestion_confidence if suggested_target_column else "Low")
+        ),
         "target_detection_metadata": {
             "top_suggestions": target_suggestions,
             "manual_override_used": target_column is not None or problem_type != "Auto-detect",
+            "smartphone_column_match_count": smartphone_match_count,
+            "smartphone_matched_columns": smartphone_matched_columns,
         },
         "target_column": target_column,
         "target_column_used_for_inference": target_used,

@@ -133,9 +133,20 @@ def normalize_smartphone_column_name(name: Any) -> str:
 
 def detect_smartphone_dataset(columns: list[str] | pd.Index) -> bool:
     """Return True when the uploaded dataset matches the smartphone schema."""
+    return count_smartphone_dataset_column_matches(columns) >= 8
+
+
+def count_smartphone_dataset_column_matches(columns: list[str] | pd.Index) -> int:
+    """Count smartphone-schema columns present in the uploaded dataset."""
     normalized_columns = {normalize_smartphone_column_name(column) for column in columns}
     matched_columns = normalized_columns & SMARTPHONE_COLUMN_HINTS
-    return len(matched_columns) >= 8
+    return len(matched_columns)
+
+
+def get_smartphone_dataset_matched_columns(columns: list[str] | pd.Index) -> list[str]:
+    """Return the sorted smartphone-schema columns present in the dataset."""
+    normalized_columns = {normalize_smartphone_column_name(column) for column in columns}
+    return sorted(normalized_columns & SMARTPHONE_COLUMN_HINTS)
 
 
 def _text_or_none(value: Any) -> str | None:
