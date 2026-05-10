@@ -859,6 +859,18 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     if len(ml_ready_df.columns) > 2:
         feature_columns = [column for column in ml_ready_df.columns if column not in {"phone_id", "model"}]
         ml_ready_df[feature_columns] = ml_ready_df[feature_columns].apply(pd.to_numeric, errors="coerce").fillna(0)
+
+    # Constant recommendation features add no signal for cosine similarity, so
+    # drop them only from the ML-ready export while keeping the readable file
+    # intact for EDA and viva explanations.
+    constant_feature_columns = [
+        column
+        for column in ml_ready_df.columns
+        if column not in {"phone_id", "model"} and ml_ready_df[column].nunique(dropna=False) <= 1
+    ]
+    if constant_feature_columns:
+        ml_ready_df = ml_ready_df.drop(columns=constant_feature_columns)
+    ml_ready_df.attrs["constant_features_dropped_from_ml_ready"] = constant_feature_columns
     return readable_df, ml_ready_df
 
 
@@ -918,6 +930,7 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
     if ml_ready_df is not None:
         feature_count = max(0, len(ml_ready_df.columns) - 2)
         _record("ml_ready_feature_count", feature_count > 20, "ML-ready dataset should contain more than 20 useful recommendation features")
+        dropped_constant_features = set(ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", []))
         required_scaled_columns = [
             "price_scaled",
             "rating_scaled",
@@ -931,7 +944,11 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
             "front_camera_mp_scaled",
             "processor_speed_ghz_scaled",
         ]
-        missing_scaled_columns = [column for column in required_scaled_columns if column not in ml_ready_df.columns]
+        missing_scaled_columns = [
+            column
+            for column in required_scaled_columns
+            if column not in ml_ready_df.columns and column not in dropped_constant_features
+        ]
         _record(
             "required_scaled_features_present",
             not missing_scaled_columns,
@@ -946,6 +963,16 @@ def validate_smartphone_outputs(dataframe: pd.DataFrame, ml_ready_df: pd.DataFra
             "ml_ready_has_no_missing_values",
             not ml_ready_df.isna().any().any(),
             "ML-ready dataset should not contain missing values",
+        )
+        constant_features = [
+            column
+            for column in ml_ready_df.columns
+            if column not in {"phone_id", "model"} and ml_ready_df[column].nunique(dropna=False) <= 1
+        ]
+        _record(
+            "ml_ready_constant_features_dropped",
+            not constant_features,
+            "constant features should be removed from the ML-ready dataset because they add no similarity signal",
         )
 
     _record("records_preserved", len(dataframe) > 0, "cleaned dataset should preserve smartphone records")

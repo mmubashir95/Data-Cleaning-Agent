@@ -185,13 +185,27 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         self.assertIn("price_segment", readable_df.columns)
         self.assertIn(1024.0, readable_df["memory_card_max_gb"].tolist())
         self.assertTrue(pd.api.types.is_bool_dtype(readable_df["has_5g"]))
-        self.assertTrue(pd.api.types.is_integer_dtype(ml_ready_df["has_5g"]))
+        if "has_5g" in ml_ready_df.columns:
+            self.assertTrue(pd.api.types.is_integer_dtype(ml_ready_df["has_5g"]))
+        else:
+            self.assertIn("has_5g", ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", []))
         self.assertFalse(any(str(ml_ready_df[column].dtype) == "bool" for column in ml_ready_df.columns))
         self.assertFalse(
             ml_ready_df.astype(str).apply(
-                lambda series: series.str.contains(r"^(True|False)$", regex=True).any()
+                lambda series: series.str.contains(r"^(?:True|False)$", regex=True).any()
             ).any()
         )
+        self.assertNotIn("has_fast_charging", ml_ready_df.columns)
+        self.assertIn(
+            "has_fast_charging",
+            ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", []),
+        )
+        remaining_constant_columns = [
+            column
+            for column in ml_ready_df.columns
+            if column not in {"phone_id", "model"} and ml_ready_df[column].nunique(dropna=False) <= 1
+        ]
+        self.assertEqual(remaining_constant_columns, [])
         self.assertIn("Premium", readable_df["price_segment"].tolist())
         self.assertIn("Flagship", readable_df["price_segment"].tolist())
         for column in [
@@ -207,7 +221,13 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
             "front_camera_mp_scaled",
             "processor_speed_ghz_scaled",
         ]:
-            self.assertIn(column, ml_ready_df.columns)
+            if column not in ml_ready_df.columns:
+                self.assertIn(
+                    column,
+                    ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", []),
+                )
+            else:
+                self.assertIn(column, ml_ready_df.columns)
         self.assertFalse(ml_ready_df.isna().any().any())
         self.assertNotIn("segment", [column.lower() for column in ml_ready_df.columns])
         self.assertTrue(readable_df["combined_text_features"].str.contains("1tb", na=False).any())
@@ -266,6 +286,9 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         )
         _, ml_ready_df = build_ecommerce_output_datasets(cleaned_df)
         summary["smartphone_validation_checks"] = validate_smartphone_outputs(cleaned_df, ml_ready_df)
+        summary["constant_features_dropped_from_ml_ready"] = list(
+            ml_ready_df.attrs.get("constant_features_dropped_from_ml_ready", [])
+        )
 
         report, report_path = generate_cleaning_report(
             {
@@ -291,6 +314,11 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         self.assertEqual(report["recommendation_algorithm_suggested"], "Content-Based Recommendation using Cosine Similarity")
         self.assertEqual(report_path.endswith("cleaning_report_smartphone_dataset.json"), True)
         self.assertIn("complex and tricky", report["smartphone_preprocessing"]["complexity_note"].lower())
+        self.assertIn("has_fast_charging", report["constant_features_dropped_from_ml_ready"])
+        self.assertIn(
+            "has_fast_charging",
+            report["smartphone_preprocessing"]["constant_features_dropped_from_ml_ready"],
+        )
 
 
 if __name__ == "__main__":

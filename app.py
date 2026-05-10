@@ -1521,6 +1521,9 @@ def render_uploaded_dataset(
                 cleaning_summary["ml_ready_dataset_columns"] = list(ml_ready_dataset.columns)
                 cleaning_summary["readable_dataset_rows"] = len(readable_dataset)
                 cleaning_summary["ml_ready_dataset_rows"] = len(ml_ready_dataset)
+                cleaning_summary["constant_features_dropped_from_ml_ready"] = list(
+                    ml_ready_dataset.attrs.get("constant_features_dropped_from_ml_ready", [])
+                )
                 cleaning_summary["rows_removed_total"] = cleaning_summary["original_rows"] - len(cleaned_df)
                 if not cleaning_summary.get("row_removal_reasons"):
                     cleaning_summary["row_removal_reasons"] = [

@@ -180,6 +180,7 @@ def generate_cleaning_report(
         "extracted_feature_columns": extracted_feature_columns,
         "normalized_categorical_columns": normalized_categorical_columns,
         "dropped_reference_columns": dropped_reference_columns,
+        "constant_features_dropped_from_ml_ready": cleaning_summary.get("constant_features_dropped_from_ml_ready", []),
         "recommendation_ready": cleaning_summary.get("recommendation_ready", False)
         or ml_recommendation.get("recommendation_ready", False),
         "ecommerce_preprocessing": {
@@ -199,6 +200,7 @@ def generate_cleaning_report(
             "shifted_or_misaligned_column_fixes": cleaning_summary.get("shifted_column_fixes", []),
             "question_mark_noise_fixes": cleaning_summary.get("noise_fixes", []),
             "tb_to_gb_conversion_applied": smartphone_preprocessing_applied,
+            "constant_features_dropped_from_ml_ready": cleaning_summary.get("constant_features_dropped_from_ml_ready", []),
             "validation_checks": smartphone_validation_checks,
             "dataset_purpose": "smartphone recommendation" if smartphone_preprocessing_applied else None,
             "complexity_note": (
