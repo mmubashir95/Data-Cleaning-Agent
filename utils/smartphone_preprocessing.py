@@ -787,6 +787,12 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     _restore_readable_category("os_family", "os_family_")
     _restore_readable_category("price_segment", "price_segment_")
 
+    for column in BOOLEAN_FEATURE_COLUMNS:
+        if column in readable_df.columns:
+            readable_df[column] = (
+                pd.to_numeric(readable_df[column], errors="coerce").fillna(0).astype(int).astype(bool)
+            )
+
     ml_ready_base = dataframe.copy(deep=True)
     scalable_columns_present = [column for column in SCALABLE_NUMERIC_COLUMNS if column in ml_ready_base.columns]
 
@@ -815,7 +821,12 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
 
     raw_categoricals = [column for column in ["brand", "processor_brand", "os_family", "price_segment"] if column in ml_ready_base.columns]
     if raw_categoricals:
-        ml_ready_base = pd.get_dummies(ml_ready_base, columns=raw_categoricals, drop_first=False)
+        ml_ready_base = pd.get_dummies(
+            ml_ready_base,
+            columns=raw_categoricals,
+            drop_first=False,
+            dtype=int,
+        )
 
     encoded_prefixes = ("brand_", "processor_brand_", "os_family_", "price_segment_")
     required_base_columns = ["phone_id", "model"]
@@ -827,6 +838,24 @@ def build_smartphone_output_datasets(dataframe: pd.DataFrame) -> tuple[pd.DataFr
     ml_ready_columns = required_base_columns + scaled_columns + boolean_columns + sorted(categorical_encoded_columns)
     ml_ready_columns = [column for column in ml_ready_columns if column in ml_ready_base.columns]
     ml_ready_df = ml_ready_base[ml_ready_columns].copy(deep=True)
+    for column in ml_ready_df.columns:
+        if str(ml_ready_df[column].dtype) == "bool":
+            ml_ready_df[column] = ml_ready_df[column].astype(int)
+
+    boolean_string_columns = [
+        column
+        for column in ml_ready_df.columns
+        if ml_ready_df[column].astype(str).str.lower().isin(["true", "false"]).all()
+    ]
+    for column in boolean_string_columns:
+        ml_ready_df[column] = (
+            ml_ready_df[column]
+            .astype(str)
+            .str.lower()
+            .map({"true": 1, "false": 0})
+            .astype(int)
+        )
+
     if len(ml_ready_df.columns) > 2:
         feature_columns = [column for column in ml_ready_df.columns if column not in {"phone_id", "model"}]
         ml_ready_df[feature_columns] = ml_ready_df[feature_columns].apply(pd.to_numeric, errors="coerce").fillna(0)

@@ -184,6 +184,14 @@ class TestSmartphoneRecommendationDataset(unittest.TestCase):
         self.assertIn("processor_brand", readable_df.columns)
         self.assertIn("price_segment", readable_df.columns)
         self.assertIn(1024.0, readable_df["memory_card_max_gb"].tolist())
+        self.assertTrue(pd.api.types.is_bool_dtype(readable_df["has_5g"]))
+        self.assertTrue(pd.api.types.is_integer_dtype(ml_ready_df["has_5g"]))
+        self.assertFalse(any(str(ml_ready_df[column].dtype) == "bool" for column in ml_ready_df.columns))
+        self.assertFalse(
+            ml_ready_df.astype(str).apply(
+                lambda series: series.str.contains(r"^(True|False)$", regex=True).any()
+            ).any()
+        )
         self.assertIn("Premium", readable_df["price_segment"].tolist())
         self.assertIn("Flagship", readable_df["price_segment"].tolist())
         for column in [
