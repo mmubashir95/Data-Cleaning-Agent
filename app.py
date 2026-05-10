@@ -32,6 +32,12 @@ from utils.ecommerce_preprocessing import (
     detect_mobile_ecommerce_dataset,
 )
 from utils.ml_recommender import recommend_ml_approach
+from utils.eda_report import (
+    build_eda_charts_summary,
+    generate_cleaning_methods_summary,
+    generate_data_issues_summary,
+    generate_eda_findings,
+)
 from utils.report_generator import generate_cleaning_report, make_safe_stem
 from utils.smartphone_preprocessing import validate_smartphone_outputs
 
@@ -1097,6 +1103,411 @@ def render_flowise_explanation_section(
             st.json(last_raw_response)
 
 
+def _render_eda_charts(df: pd.DataFrame) -> None:
+    """Render post-cleaning EDA charts from the cleaned dataset."""
+    sampled, sample_note = _sample_dataframe_for_visuals(df, max_rows=MAX_VISUALIZATION_ROWS)
+
+    col_left, col_right = st.columns(2)
+    with col_left:
+        price_series = pd.to_numeric(sampled.get("price", pd.Series(dtype=float)), errors="coerce").dropna()
+        if "price" in sampled.columns and not price_series.empty:
+            st.altair_chart(
+                alt.Chart(pd.DataFrame({"price": price_series}))
+                .mark_bar(color="#2563eb")
+                .encode(
+                    x=alt.X("price:Q", bin=alt.Bin(maxbins=25), title="Price (PKR)"),
+                    y=alt.Y("count():Q", title="Count"),
+                )
+                .properties(height=260, title="Price Distribution"),
+                use_container_width=True,
+            )
+        else:
+            st.info("Price column not available for chart.")
+
+    with col_right:
+        rating_series = pd.to_numeric(sampled.get("rating", pd.Series(dtype=float)), errors="coerce").dropna()
+        if "rating" in sampled.columns and not rating_series.empty:
+            st.altair_chart(
+                alt.Chart(pd.DataFrame({"rating": rating_series}))
+                .mark_bar(color="#0f766e")
+                .encode(
+                    x=alt.X("rating:Q", bin=alt.Bin(maxbins=20), title="Rating"),
+                    y=alt.Y("count():Q", title="Count"),
+                )
+                .properties(height=260, title="Rating Distribution"),
+                use_container_width=True,
+            )
+        else:
+            st.info("Rating column not available for chart.")
+
+    col_left2, col_right2 = st.columns(2)
+    with col_left2:
+        bat_series = pd.to_numeric(sampled.get("battery_mah", pd.Series(dtype=float)), errors="coerce").dropna()
+        if "battery_mah" in sampled.columns and not bat_series.empty:
+            st.altair_chart(
+                alt.Chart(pd.DataFrame({"battery_mah": bat_series}))
+                .mark_bar(color="#7c3aed")
+                .encode(
+                    x=alt.X("battery_mah:Q", bin=alt.Bin(maxbins=20), title="Battery (mAh)"),
+                    y=alt.Y("count():Q", title="Count"),
+                )
+                .properties(height=260, title="Battery Capacity Distribution"),
+                use_container_width=True,
+            )
+        else:
+            st.info("Battery capacity column (battery_mah) not available.")
+
+    with col_right2:
+        if "ram_gb" in sampled.columns:
+            ram_counts = (
+                pd.to_numeric(sampled["ram_gb"], errors="coerce")
+                .dropna()
+                .value_counts()
+                .sort_index()
+                .rename_axis("ram_gb")
+                .reset_index(name="count")
+            )
+            if not ram_counts.empty:
+                st.altair_chart(
+                    alt.Chart(ram_counts)
+                    .mark_bar(color="#db2777")
+                    .encode(
+                        x=alt.X("ram_gb:O", title="RAM (GB)"),
+                        y=alt.Y("count:Q", title="Count"),
+                        tooltip=["ram_gb", "count"],
+                    )
+                    .properties(height=260, title="RAM Comparison"),
+                    use_container_width=True,
+                )
+            else:
+                st.info("RAM column exists but has no valid values.")
+        else:
+            st.info("RAM column (ram_gb) not available.")
+
+    if "brand" in sampled.columns:
+        brand_counts = (
+            sampled["brand"].dropna().astype(str)
+            .value_counts().head(12)
+            .rename_axis("brand").reset_index(name="count")
+        )
+        if not brand_counts.empty:
+            st.altair_chart(
+                alt.Chart(brand_counts)
+                .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#f59e0b")
+                .encode(
+                    x=alt.X("count:Q", title="Number of Models"),
+                    y=alt.Y("brand:N", sort="-x", title="Brand"),
+                    tooltip=["brand", "count"],
+                )
+                .properties(height=360, title="Brand Analysis — Top Brands by Model Count"),
+                use_container_width=True,
+            )
+    else:
+        st.info("Brand column not available.")
+
+    col_left3, col_right3 = st.columns(2)
+    with col_left3:
+        if "os_family" in sampled.columns:
+            os_counts = (
+                sampled["os_family"].dropna().astype(str)
+                .value_counts()
+                .rename_axis("os_family").reset_index(name="count")
+            )
+            if not os_counts.empty:
+                st.altair_chart(
+                    alt.Chart(os_counts)
+                    .mark_bar(color="#0891b2")
+                    .encode(
+                        x=alt.X("os_family:N", title="OS Family"),
+                        y=alt.Y("count:Q", title="Count"),
+                        color=alt.Color("os_family:N", legend=None),
+                        tooltip=["os_family", "count"],
+                    )
+                    .properties(height=260, title="OS Distribution"),
+                    use_container_width=True,
+                )
+            else:
+                st.info("OS family column has no values.")
+        else:
+            st.info("OS family column not available.")
+
+    with col_right3:
+        if "storage_gb" in sampled.columns:
+            storage_counts = (
+                pd.to_numeric(sampled["storage_gb"], errors="coerce")
+                .dropna().value_counts().sort_index()
+                .rename_axis("storage_gb").reset_index(name="count")
+            )
+            if not storage_counts.empty:
+                st.altair_chart(
+                    alt.Chart(storage_counts)
+                    .mark_bar(color="#16a34a")
+                    .encode(
+                        x=alt.X("storage_gb:O", title="Storage (GB)"),
+                        y=alt.Y("count:Q", title="Count"),
+                        tooltip=["storage_gb", "count"],
+                    )
+                    .properties(height=260, title="Storage Comparison"),
+                    use_container_width=True,
+                )
+            else:
+                st.info("Storage column has no valid values.")
+        else:
+            st.info("Storage column (storage_gb) not available.")
+
+    # Correlation heatmap — exclude scaled and constant-like columns to keep it readable.
+    numeric_cols = sampled.select_dtypes(include="number").columns.tolist()
+    core_numeric = [c for c in numeric_cols if not c.endswith("_scaled") and sampled[c].nunique() > 2][:MAX_HEATMAP_COLUMNS]
+    if len(core_numeric) >= 2:
+        corr_df = sampled[core_numeric].apply(pd.to_numeric, errors="coerce").corr().round(2)
+        corr_long = (
+            corr_df.reset_index()
+            .melt(id_vars="index", var_name="variable", value_name="correlation")
+            .rename(columns={"index": "feature"})
+        )
+        heatmap = (
+            alt.Chart(corr_long)
+            .mark_rect()
+            .encode(
+                x=alt.X("feature:N", title=None),
+                y=alt.Y("variable:N", title=None),
+                color=alt.Color("correlation:Q", scale=alt.Scale(scheme="blueorange", domain=[-1, 1]), title="r"),
+                tooltip=["feature", "variable", "correlation"],
+            )
+            .properties(height=360, title="Correlation Heatmap (Numeric Features)")
+        )
+        labels = (
+            alt.Chart(corr_long)
+            .mark_text(fontSize=10)
+            .encode(
+                x=alt.X("feature:N"),
+                y=alt.Y("variable:N"),
+                text=alt.Text("correlation:Q", format=".2f"),
+                color=alt.condition(
+                    "abs(datum.correlation) > 0.5",
+                    alt.value("white"),
+                    alt.value("black"),
+                ),
+            )
+        )
+        st.altair_chart(heatmap + labels, use_container_width=True)
+    else:
+        st.info("Not enough numeric columns with variance to build a correlation heatmap.")
+
+    if sample_note:
+        st.caption(sample_note)
+
+
+def _render_eda_findings(cleaning_summary: dict) -> None:
+    """Display written insights extracted from the cleaned dataset."""
+    findings = cleaning_summary.get("eda_findings", {})
+    if not findings:
+        st.info("EDA findings are not available. Re-run the cleaning pipeline to generate them.")
+        return
+
+    st.markdown("#### Key Patterns Found in the Dataset")
+
+    if "top_brand" in findings:
+        brand_str = ", ".join(
+            f"**{b}** ({c})" for b, c in list(findings.get("top_brands", {}).items())[:5]
+        )
+        st.markdown(f"- **Most frequent brands:** {brand_str}")
+        if "unique_brand_count" in findings:
+            st.markdown(f"- **Unique brands:** {findings['unique_brand_count']}")
+
+    if "price_median" in findings:
+        st.markdown(
+            f"- **Price range:** PKR {findings['price_min']:,.0f} – {findings['price_max']:,.0f}"
+            f" | Median PKR {findings['price_median']:,.0f} | Mean PKR {findings['price_mean']:,.0f}"
+        )
+
+    if "rating_mean" in findings:
+        st.markdown(
+            f"- **Rating:** Mean {findings['rating_mean']}, Median {findings['rating_median']}"
+            f" (range {findings['rating_min']} – {findings['rating_max']})"
+        )
+
+    if "ram_gb_median" in findings:
+        common_ram = ", ".join(
+            f"{k} GB ({v})" for k, v in findings.get("common_ram_gb_values", {}).items()
+        )
+        st.markdown(f"- **RAM:** Median {findings['ram_gb_median']} GB | Most common: {common_ram}")
+
+    if "storage_gb_median" in findings:
+        common_storage = ", ".join(
+            f"{k} GB ({v})" for k, v in findings.get("common_storage_gb_values", {}).items()
+        )
+        st.markdown(f"- **Storage:** Median {findings['storage_gb_median']} GB | Most common: {common_storage}")
+
+    if "battery_mean_mah" in findings:
+        st.markdown(
+            f"- **Battery:** Mean {findings['battery_mean_mah']:,.0f} mAh,"
+            f" Median {findings['battery_median_mah']:,.0f} mAh"
+            f" (range {findings['battery_min_mah']:,.0f} – {findings['battery_max_mah']:,.0f} mAh)"
+        )
+
+    if "dominant_os" in findings:
+        os_dist = ", ".join(f"{k}: {v}" for k, v in findings.get("os_distribution", {}).items())
+        st.markdown(f"- **OS distribution:** {os_dist} | Dominant: **{findings['dominant_os']}**")
+
+    if "smartphones_with_5g_percent" in findings:
+        st.markdown(f"- **5G adoption:** {findings['smartphones_with_5g_percent']}% of smartphones support 5G")
+
+    if findings.get("non_smartphones_removed", 0) > 0:
+        st.markdown(
+            f"- **Non-smartphone records removed:** {findings['non_smartphones_removed']}"
+            " (feature phones, iPods, Karbonn, JioPhone, etc.)"
+        )
+
+
+def _render_data_issues(cleaning_summary: dict) -> None:
+    """Display a consolidated table of all detected data quality issues."""
+    issues = cleaning_summary.get("data_issues", {})
+    if not issues:
+        st.info("Data issues summary not available. Re-run the cleaning pipeline to generate it.")
+        return
+
+    st.markdown("#### Detected Data Quality Issues")
+
+    total_missing = issues.get("total_missing_values", 0)
+    dups = issues.get("duplicate_rows", 0)
+    shifts = issues.get("column_shift_issues_fixed", 0)
+    noisy = issues.get("noisy_text_cells_fixed", 0)
+    non_phones = issues.get("non_smartphone_records_removed", 0)
+    contamination = issues.get("display_contamination_rows", 0)
+    suspicious = issues.get("suspicious_records_count", 0)
+    outlier_count = issues.get("outlier_column_count", 0)
+    wrong_types = issues.get("wrong_type_columns_fixed", [])
+    extraction_cols = issues.get("columns_requiring_feature_extraction", [])
+
+    rows = [
+        {
+            "Issue": "Missing Values",
+            "Count / Detail": f"{total_missing} values across {len(issues.get('missing_values_columns', {}))} columns",
+            "Severity": "High" if total_missing > 100 else ("Medium" if total_missing > 0 else "None"),
+            "Resolution": "Filled with median / mode / 0 / Unknown",
+        },
+        {
+            "Issue": "Duplicate Rows",
+            "Count / Detail": str(dups),
+            "Severity": "High" if dups > 10 else ("Low" if dups > 0 else "None"),
+            "Resolution": "Removed" if dups > 0 else "None needed",
+        },
+        {
+            "Issue": "Column Shifts / Misalignment",
+            "Count / Detail": f"{shifts} rows corrected",
+            "Severity": "High" if shifts > 0 else "None",
+            "Resolution": f"{shifts} cells corrected" if shifts else "Not detected",
+        },
+        {
+            "Issue": "Noisy Text (?, placeholders)",
+            "Count / Detail": f"{noisy} cells replaced",
+            "Severity": "Medium" if noisy > 0 else "None",
+            "Resolution": "Replaced with NaN and refilled" if noisy else "Not detected",
+        },
+        {
+            "Issue": "Non-Smartphone Records",
+            "Count / Detail": f"{non_phones} records",
+            "Severity": "High" if non_phones > 0 else "None",
+            "Resolution": "Removed from cleaned and ML-ready outputs" if non_phones else "Not detected",
+        },
+        {
+            "Issue": "Display Column Contamination",
+            "Count / Detail": f"{contamination} rows",
+            "Severity": "High" if contamination > 0 else "None",
+            "Resolution": "Flagged with display_contamination_type column" if contamination else "Not detected",
+        },
+        {
+            "Issue": "Suspicious / Anomalous Records",
+            "Count / Detail": f"{suspicious} records flagged",
+            "Severity": "Medium" if suspicious > 0 else "None",
+            "Resolution": "Flagged; critical records excluded in strict mode",
+        },
+        {
+            "Issue": "Outliers",
+            "Count / Detail": f"{outlier_count} columns with outliers",
+            "Severity": "Medium" if outlier_count > 0 else "None",
+            "Resolution": "Capped using IQR; luxury devices preserved with flags",
+        },
+        {
+            "Issue": "Wrong Data Types",
+            "Count / Detail": f"{len(wrong_types)} columns fixed",
+            "Severity": "Medium" if wrong_types else "None",
+            "Resolution": "Type conversion applied" if wrong_types else "Not detected",
+        },
+        {
+            "Issue": "Unstructured Text Columns (need extraction)",
+            "Count / Detail": f"{len(extraction_cols)} columns",
+            "Severity": "High" if extraction_cols else "None",
+            "Resolution": "Domain-specific regex parsers applied" if extraction_cols else "Not detected",
+        },
+    ]
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    missing_cols = issues.get("missing_values_columns", {})
+    if missing_cols:
+        with st.expander("Missing values by column"):
+            st.dataframe(
+                pd.DataFrame(
+                    [{"Column": c, "Missing Count": v} for c, v in sorted(missing_cols.items(), key=lambda x: -x[1])]
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+
+def _render_cleaning_methods(cleaning_summary: dict) -> None:
+    """Display a table of all cleaning methods applied to the dataset."""
+    methods = cleaning_summary.get("cleaning_methods", {})
+    if not methods:
+        st.info("Cleaning methods summary not available. Re-run the cleaning pipeline to generate it.")
+        return
+
+    st.markdown("#### Cleaning Methods Applied")
+
+    label_map = {
+        "missing_value_handling": "Missing Value Handling",
+        "duplicate_removal": "Duplicate Removal",
+        "text_standardization": "Text Standardization",
+        "numeric_extraction_from_text": "Numeric Extraction from Text",
+        "smartphone_only_filtering": "Smartphone-Only Filtering",
+        "price_parsing": "Price Parsing",
+        "ram_storage_extraction": "RAM / Storage Extraction",
+        "battery_extraction": "Battery Extraction",
+        "display_feature_extraction": "Display Feature Extraction",
+        "camera_feature_extraction": "Camera Feature Extraction",
+        "os_standardization": "OS Standardization",
+        "display_contamination_handling": "Display Contamination Handling",
+        "price_outlier_flagging": "Price Outlier Flagging",
+        "categorical_encoding": "Categorical Encoding",
+        "feature_scaling": "Feature Scaling",
+        "nlp_text_cleaning": "NLP Text Cleaning",
+    }
+
+    rows = [
+        {"Cleaning Method": label_map.get(k, k.replace("_", " ").title()), "What Was Applied": v}
+        for k, v in methods.items()
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def render_eda_report(cleaned_df: pd.DataFrame, cleaning_summary: dict) -> None:
+    """Render the EDA Report section with Charts, Findings, Data Issues, and Cleaning Methods tabs."""
+    st.subheader("EDA Report")
+    tab_charts, tab_findings, tab_issues, tab_methods = st.tabs(
+        ["Charts", "Findings", "Data Issues", "Cleaning Methods"]
+    )
+    with tab_charts:
+        _render_eda_charts(cleaned_df)
+    with tab_findings:
+        _render_eda_findings(cleaning_summary)
+    with tab_issues:
+        _render_data_issues(cleaning_summary)
+    with tab_methods:
+        _render_cleaning_methods(cleaning_summary)
+
+
 def render_cleaning_results(
     cleaned_df: pd.DataFrame,
     cleaning_summary: dict,
@@ -1336,6 +1747,8 @@ def render_cleaning_results(
             for column_name, example in cleaning_summary["nlp_before_after_examples"].items():
                 st.write(f"{column_name} before: {example['before']}")
                 st.write(f"{column_name} after: {example['after']}")
+
+    render_eda_report(cleaned_df, cleaning_summary)
 
     render_pandas_numpy_usage_section(
         cleaning_report.get("pandas_numpy_usage", {})
@@ -1594,6 +2007,22 @@ def render_uploaded_dataset(
                     ]
 
             dataset_to_save_as_cleaned.to_csv(cleaned_csv_path, index=False)
+
+            # Generate EDA report data before building the JSON report so all
+            # four sections (findings, data_issues, cleaning_methods, charts)
+            # are included in the downloadable report JSON.
+            cleaning_summary["eda_findings"] = generate_eda_findings(
+                dataset_to_save_as_cleaned, cleaning_summary
+            )
+            cleaning_summary["data_issues"] = generate_data_issues_summary(
+                cleaning_summary, profile
+            )
+            cleaning_summary["cleaning_methods"] = generate_cleaning_methods_summary(
+                cleaning_summary
+            )
+            cleaning_summary["eda_charts_summary"] = build_eda_charts_summary(
+                dataset_to_save_as_cleaned
+            )
 
             cleaning_report, cleaning_report_path = generate_cleaning_report(
                 profile,
